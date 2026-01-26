@@ -82,12 +82,7 @@ const statCpDetected = document.getElementById('stat-cp-detected');
 
 // DOM Elements - Accuracy Metrics
 const accuracyMetrics = document.getElementById('accuracy-metrics');
-const metricPrecision = document.getElementById('metric-precision');
-const metricRecall = document.getElementById('metric-recall');
-const metricF1 = document.getElementById('metric-f1');
-const metricTp = document.getElementById('metric-tp');
-const metricFp = document.getElementById('metric-fp');
-const metricFn = document.getElementById('metric-fn');
+const accuracyTableBody = document.getElementById('accuracy-table-body');
 
 // DOM Elements - Tables
 const cpDetail = document.getElementById('change-points-detail');
@@ -1442,9 +1437,40 @@ function updateChart(data) {
         `;
     }
 
-    // Store MA result for stats display
-    data._maResult = maResult;
-    data._maClassification = maClassification;
+    // Store all results for accuracy metrics display
+    data._methodResults = {
+        otava: runOtavaCheckbox.checked ? {
+            name: 'Otava',
+            classification: otavaClassification,
+            detectedIndices: detectedIndices
+        } : null,
+        ma: runMa ? {
+            name: 'Moving Average',
+            classification: maClassification,
+            detectedIndices: maDetectedIndices
+        } : null,
+        boundary: runBoundary ? {
+            name: 'Boundary',
+            classification: boundaryClassification,
+            detectedIndices: boundaryDetectedIndices
+        } : null,
+        threshold: runThreshold ? {
+            name: 'Threshold Alert',
+            classification: thresholdClassification,
+            detectedIndices: thresholdDetectedIndices
+        } : null,
+        slidingWindow: runSlidingWindow ? {
+            name: 'Sliding Window',
+            classification: slidingWindowClassification,
+            detectedIndices: slidingWindowDetectedIndices
+        } : null,
+        stdDev: runStdDev ? {
+            name: 'Std Dev',
+            classification: stdDevClassification,
+            detectedIndices: stdDevDetectedIndices
+        } : null
+    };
+    data._groundTruthCount = groundTruthIndices.length;
 }
 
 // Update statistics display
@@ -1467,23 +1493,64 @@ function updateStats(data) {
 
 // Update accuracy metrics display
 function updateAccuracyMetrics(data) {
-    if (!data.accuracy) {
-        metricPrecision.textContent = '-';
-        metricRecall.textContent = '-';
-        metricF1.textContent = '-';
-        metricTp.textContent = '-';
-        metricFp.textContent = '-';
-        metricFn.textContent = '-';
+    // Clear the table
+    accuracyTableBody.innerHTML = '';
+
+    const methodResults = data._methodResults;
+    const groundTruthCount = data._groundTruthCount || 0;
+
+    if (!methodResults) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="8" class="empty-message">No analysis methods enabled</td>';
+        accuracyTableBody.appendChild(row);
         return;
     }
 
-    const acc = data.accuracy;
-    metricPrecision.textContent = (acc.precision * 100).toFixed(0) + '%';
-    metricRecall.textContent = (acc.recall * 100).toFixed(0) + '%';
-    metricF1.textContent = (acc.f1_score * 100).toFixed(0) + '%';
-    metricTp.textContent = acc.true_positives;
-    metricFp.textContent = acc.false_positives;
-    metricFn.textContent = acc.false_negatives;
+    // Add a row for each enabled method
+    const methodOrder = ['otava', 'ma', 'boundary', 'threshold', 'slidingWindow', 'stdDev'];
+    let hasAnyMethod = false;
+
+    for (const methodKey of methodOrder) {
+        const method = methodResults[methodKey];
+        if (!method) continue;
+
+        hasAnyMethod = true;
+        const { tp, cm, fp } = method.classification;
+
+        // FN = ground truth not matched by any detection (exact or close)
+        // Since each method is evaluated independently, FN = groundTruthCount - (tp + cm)
+        const fn = Math.max(0, groundTruthCount - tp - cm);
+
+        // Calculate precision, recall, F1
+        // For precision: TP+CM are "good" detections, FP are bad
+        const totalDetected = tp + cm + fp;
+        const precision = totalDetected > 0 ? (tp + cm) / totalDetected : 0;
+
+        // For recall: how many ground truth were found (exactly or closely)
+        const recall = groundTruthCount > 0 ? (tp + cm) / groundTruthCount : 0;
+
+        // F1 score
+        const f1 = (precision + recall) > 0 ? 2 * precision * recall / (precision + recall) : 0;
+
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td><strong>${method.name}</strong></td>
+            <td>${tp}</td>
+            <td>${cm}</td>
+            <td>${fp}</td>
+            <td>${fn}</td>
+            <td>${(precision * 100).toFixed(0)}%</td>
+            <td>${(recall * 100).toFixed(0)}%</td>
+            <td>${(f1 * 100).toFixed(0)}%</td>
+        `;
+        accuracyTableBody.appendChild(row);
+    }
+
+    if (!hasAnyMethod) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="8" class="empty-message">No analysis methods enabled</td>';
+        accuracyTableBody.appendChild(row);
+    }
 }
 
 // Update comparison tables

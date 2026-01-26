@@ -252,31 +252,23 @@
         <!-- Accuracy Metrics -->
         <section class="accuracy-metrics" id="accuracy-metrics">
             <h3>Detection Accuracy</h3>
-            <div class="metrics-grid">
-                <div class="metric-card precision">
-                    <h4>Precision</h4>
-                    <span id="metric-precision">-</span>
-                    <p class="metric-desc">Correct / All Detected</p>
-                </div>
-                <div class="metric-card recall">
-                    <h4>Recall</h4>
-                    <span id="metric-recall">-</span>
-                    <p class="metric-desc">Detected / All True</p>
-                </div>
-                <div class="metric-card f1">
-                    <h4>F1 Score</h4>
-                    <span id="metric-f1">-</span>
-                    <p class="metric-desc">Harmonic Mean</p>
-                </div>
-                <div class="metric-card counts">
-                    <h4>Counts</h4>
-                    <div class="count-details">
-                        <span>TP: <strong id="metric-tp">-</strong></span>
-                        <span>FP: <strong id="metric-fp">-</strong></span>
-                        <span>FN: <strong id="metric-fn">-</strong></span>
-                    </div>
-                </div>
-            </div>
+            <table class="accuracy-table">
+                <thead>
+                    <tr>
+                        <th>Method</th>
+                        <th>TP</th>
+                        <th>CM</th>
+                        <th>FP</th>
+                        <th>FN</th>
+                        <th>Precision</th>
+                        <th>Recall</th>
+                        <th>F1</th>
+                    </tr>
+                </thead>
+                <tbody id="accuracy-table-body">
+                    <!-- Rows will be dynamically inserted -->
+                </tbody>
+            </table>
         </section>
 
         <!-- Basic Stats -->
