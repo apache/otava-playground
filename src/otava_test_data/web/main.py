@@ -709,7 +709,7 @@ async def generate_data(
     seed: int = Query(default=42),
     run_otava: bool = Query(default=False, description="Run Otava analysis"),
     window_len: int = Query(default=30, ge=5, le=100, description="Otava window length"),
-    max_pvalue: float = Query(default=0.05, ge=0.001, le=1.0, description="Otava max p-value"),
+    max_pvalue: float = Query(default=0.05, ge=0.0, le=1.0, description="Otava max p-value"),
     tolerance: int = Query(default=5, ge=0, le=50, description="Accuracy tolerance"),
     # Dynamic params will be passed as query parameters
     request: Request = None,
@@ -762,7 +762,7 @@ async def analyze_with_otava(
     length: int = Query(default=200, ge=10, le=2000),
     seed: int = Query(default=42),
     window_len: int = Query(default=30, ge=5, le=100, description="Otava window length"),
-    max_pvalue: float = Query(default=0.05, ge=0.001, le=1.0, description="Otava max p-value"),
+    max_pvalue: float = Query(default=0.05, ge=0.0, le=1.0, description="Otava max p-value"),
     min_magnitude: float = Query(default=0.0, ge=0, description="Minimum change magnitude"),
     tolerance: int = Query(default=5, ge=0, le=50, description="Accuracy tolerance"),
     request: Request = None,
