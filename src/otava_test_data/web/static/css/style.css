@@ -941,6 +941,19 @@ footer a:hover {
     font-size: 0.9rem;
 }
 
+/* Std Dev Controls Section */
+.stddev-controls {
+    border-left: 3px solid #a855f7;
+}
+
+.stddev-controls .section-title,
+.stddev-controls .panel-title {
+    grid-column: 1 / -1;
+    margin: 0 0 0.25rem 0;
+    color: #a855f7;
+    font-size: 0.9rem;
+}
+
 /* Accuracy Metrics */
 .accuracy-metrics {
     background: var(--surface);
@@ -1156,6 +1169,10 @@ footer a:hover {
 
 .stacked-chart-header .method-indicator.slidingWindow {
     background: #14b8a6;
+}
+
+.stacked-chart-header .method-indicator.stdDev {
+    background: #a855f7;
 }
 
 .stacked-chart-header .detection-count {

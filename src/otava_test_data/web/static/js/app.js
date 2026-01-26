@@ -53,6 +53,11 @@ const slidingWindowSizeInput = document.getElementById('sliding-window-size-inpu
 const slidingWindowOffsetInput = document.getElementById('sliding-window-offset-input');
 const slidingWindowThresholdInput = document.getElementById('sliding-window-threshold-input');
 
+// DOM Elements - Std Dev Controls
+const runStdDevCheckbox = document.getElementById('run-stddev-checkbox');
+const stdDevWindowInput = document.getElementById('stddev-window-input');
+const stdDevNumInput = document.getElementById('stddev-num-input');
+
 // Default match tolerance for comparing detected vs ground truth change points
 const DEFAULT_TOLERANCE = 0;  // Exact match for True Positive
 const CLOSE_MATCH_TOLERANCE = 5;  // Within 5 points for Close Match
@@ -451,6 +456,11 @@ function setupEventListeners() {
     slidingWindowSizeInput.addEventListener('change', generateData);
     slidingWindowOffsetInput.addEventListener('change', generateData);
     slidingWindowThresholdInput.addEventListener('change', generateData);
+
+    // Std Dev controls
+    runStdDevCheckbox.addEventListener('change', generateData);
+    stdDevWindowInput.addEventListener('change', generateData);
+    stdDevNumInput.addEventListener('change', generateData);
 }
 
 // Update generator info display
@@ -691,6 +701,52 @@ function detectChangePointsSlidingWindow(data, windowSize, offset, threshold) {
 }
 
 /**
+ * Standard Deviation Based Change Point Detection
+ * For each point P, compare it to mean ± K standard deviations of M previous points
+ * If P is outside this range, trigger an alert
+ * @param {number[]} data - The time series data
+ * @param {number} windowSize - Number of previous points to use (M)
+ * @param {number} numStdDevs - Number of standard deviations (K)
+ */
+function detectChangePointsStdDev(data, windowSize, numStdDevs) {
+    const indices = [];
+    const details = [];
+
+    // Need at least windowSize points before we can start
+    for (let i = windowSize; i < data.length; i++) {
+        // Get the M previous points (not including current point)
+        const window = data.slice(i - windowSize, i);
+
+        // Compute mean and standard deviation
+        const mean = window.reduce((a, b) => a + b, 0) / windowSize;
+        const variance = window.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / windowSize;
+        const stdDev = Math.sqrt(variance);
+
+        // Current point
+        const value = data[i];
+
+        // Check if outside mean ± K std devs
+        const upperBound = mean + numStdDevs * stdDev;
+        const lowerBound = mean - numStdDevs * stdDev;
+        const zScore = stdDev > 0 ? (value - mean) / stdDev : 0;
+
+        if (value > upperBound || value < lowerBound) {
+            indices.push(i);
+            details.push({
+                index: i,
+                value: value.toFixed(2),
+                mean: mean.toFixed(2),
+                stdDev: stdDev.toFixed(2),
+                zScore: zScore.toFixed(2),
+                direction: value > upperBound ? 'above' : 'below'
+            });
+        }
+    }
+
+    return { indices, details };
+}
+
+/**
  * Boundary/Threshold Change Point Detection
  * Detects change points when values cross upper or lower boundaries
  * Only triggers once per boundary crossing (not for every point outside bounds)
@@ -895,6 +951,16 @@ function updateChart(data) {
     // Classify Sliding Window detections
     const slidingWindowClassification = classifyDetections(slidingWindowDetectedIndices, groundTruthIndices);
 
+    // Run Std Dev detection if enabled
+    const runStdDev = runStdDevCheckbox.checked;
+    const stdDevWindow = parseInt(stdDevWindowInput.value);
+    const stdDevNum = parseFloat(stdDevNumInput.value);
+    const stdDevResult = runStdDev ? detectChangePointsStdDev(values, stdDevWindow, stdDevNum) : { indices: [], details: [] };
+    const stdDevDetectedIndices = stdDevResult.indices;
+
+    // Classify Std Dev detections
+    const stdDevClassification = classifyDetections(stdDevDetectedIndices, groundTruthIndices);
+
     // Create ground truth annotations (shared by all charts)
     const createAnnotations = () => {
         const annotations = {};
@@ -980,6 +1046,7 @@ function updateChart(data) {
     if (runBoundary) enabledMethods.push('boundary');
     if (runThreshold) enabledMethods.push('threshold');
     if (runSlidingWindow) enabledMethods.push('slidingWindow');
+    if (runStdDev) enabledMethods.push('stdDev');
 
     // Create Otava chart if enabled
     if (runOtavaCheckbox.checked) {
@@ -1301,6 +1368,64 @@ function updateChart(data) {
                     pointRadius: slidingWindowPointRadii,
                     pointHoverRadius: 8,
                     pointStyle: slidingWindowPointStyles,
+                }]
+            },
+            options: getChartOptions(createAnnotations(), isLast)
+        });
+        stackedCharts.push(chart);
+    }
+
+    // Create Std Dev chart if enabled
+    if (runStdDev) {
+        const { tp: stdDevTp, cm: stdDevCm, fp: stdDevFp, exactMatches: stdDevExact, closeMatches: stdDevClose } = stdDevClassification;
+        const canvas = createChartContainer('stdDev', `Std Dev (M=${stdDevWindow}, K=${stdDevNum}σ)`, '#a855f7', stdDevTp, stdDevCm, stdDevFp);
+        const ctx = canvas.getContext('2d');
+
+        const stdDevPointColors = values.map((_, i) => {
+            if (stdDevDetectedIndices.includes(i)) {
+                if (stdDevExact.has(i)) return '#f87171';
+                if (stdDevClose.has(i)) return '#fde047';
+                return '#f97316';
+            }
+            return 'transparent';
+        });
+        const stdDevPointBorders = values.map((_, i) => {
+            if (stdDevDetectedIndices.includes(i)) {
+                if (stdDevExact.has(i)) return '#ef4444';
+                if (stdDevClose.has(i)) return '#eab308';
+                return '#ea580c';
+            }
+            return 'transparent';
+        });
+        const stdDevPointRadii = values.map((_, i) => stdDevDetectedIndices.includes(i) ? 6 : 0);
+        const stdDevPointStyles = values.map((_, i) => {
+            if (stdDevDetectedIndices.includes(i)) {
+                if (stdDevExact.has(i)) return 'circle';
+                if (stdDevClose.has(i)) return 'rectRot';
+                return 'triangle';
+            }
+            return 'circle';
+        });
+
+        const isLast = enabledMethods[enabledMethods.length - 1] === 'stdDev';
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Std Dev Detection',
+                    data: values,
+                    borderColor: '#94a3b8',
+                    backgroundColor: 'rgba(148, 163, 184, 0.1)',
+                    borderWidth: 1.5,
+                    fill: true,
+                    tension: 0,
+                    pointBackgroundColor: stdDevPointColors,
+                    pointBorderColor: stdDevPointBorders,
+                    pointBorderWidth: 1.5,
+                    pointRadius: stdDevPointRadii,
+                    pointHoverRadius: 8,
+                    pointStyle: stdDevPointStyles,
                 }]
             },
             options: getChartOptions(createAnnotations(), isLast)

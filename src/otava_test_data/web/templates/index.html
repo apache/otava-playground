@@ -194,6 +194,24 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Std Dev Controls -->
+                <div class="controls stddev-controls">
+                    <div class="panel-header">
+                        <label for="run-stddev-checkbox" class="panel-title">Std Dev</label>
+                        <input type="checkbox" id="run-stddev-checkbox">
+                    </div>
+                    <div class="panel-fields">
+                        <div class="control-group">
+                            <label for="stddev-window-input">Window (M)</label>
+                            <input type="number" id="stddev-window-input" value="20" min="5" max="100" step="1">
+                        </div>
+                        <div class="control-group">
+                            <label for="stddev-num-input">Std Devs (K)</label>
+                            <input type="number" id="stddev-num-input" value="2" min="0.5" max="5" step="0.1">
+                        </div>
+                    </div>
+                </div>
             </div>
         </section>
 
