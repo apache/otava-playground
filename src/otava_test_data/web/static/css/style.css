@@ -920,6 +920,19 @@ footer a:hover {
     font-size: 0.9rem;
 }
 
+/* Sliding Window Controls Section */
+.sliding-window-controls {
+    border-left: 3px solid #14b8a6;
+}
+
+.sliding-window-controls .section-title,
+.sliding-window-controls .panel-title {
+    grid-column: 1 / -1;
+    margin: 0 0 0.25rem 0;
+    color: #14b8a6;
+    font-size: 0.9rem;
+}
+
 /* Accuracy Metrics */
 .accuracy-metrics {
     background: var(--surface);
@@ -1131,6 +1144,10 @@ footer a:hover {
 
 .stacked-chart-header .method-indicator.threshold {
     background: #ec4899;
+}
+
+.stacked-chart-header .method-indicator.slidingWindow {
+    background: #14b8a6;
 }
 
 .stacked-chart-header .detection-count {

@@ -47,6 +47,12 @@ const runThresholdCheckbox = document.getElementById('run-threshold-checkbox');
 const thresholdPercentInput = document.getElementById('threshold-percent-input');
 const thresholdOffsetInput = document.getElementById('threshold-offset-input');
 
+// DOM Elements - Sliding Window Controls
+const runSlidingWindowCheckbox = document.getElementById('run-sliding-window-checkbox');
+const slidingWindowSizeInput = document.getElementById('sliding-window-size-input');
+const slidingWindowOffsetInput = document.getElementById('sliding-window-offset-input');
+const slidingWindowThresholdInput = document.getElementById('sliding-window-threshold-input');
+
 // Default match tolerance for comparing detected vs ground truth change points
 const DEFAULT_TOLERANCE = 0;
 
@@ -438,6 +444,12 @@ function setupEventListeners() {
     runThresholdCheckbox.addEventListener('change', generateData);
     thresholdPercentInput.addEventListener('change', generateData);
     thresholdOffsetInput.addEventListener('change', generateData);
+
+    // Sliding Window controls
+    runSlidingWindowCheckbox.addEventListener('change', generateData);
+    slidingWindowSizeInput.addEventListener('change', generateData);
+    slidingWindowOffsetInput.addEventListener('change', generateData);
+    slidingWindowThresholdInput.addEventListener('change', generateData);
 }
 
 // Update generator info display
@@ -622,6 +634,62 @@ function detectChangePointsThreshold(data, threshold, offset = 1) {
 }
 
 /**
+ * Sliding Window Change Point Detection
+ * Compares average of current window with average of reference window (offset back by M points)
+ * Detects change when percentage difference exceeds threshold
+ * @param {number[]} data - The time series data
+ * @param {number} windowSize - Number of points in each window (N)
+ * @param {number} offset - How far back the reference window is (M)
+ * @param {number} threshold - Percentage threshold for detection
+ */
+function detectChangePointsSlidingWindow(data, windowSize, offset, threshold) {
+    const indices = [];
+    const details = [];
+    const halfWindow = Math.floor(windowSize / 2);
+
+    // Need enough points for both windows
+    const startIdx = halfWindow + offset + halfWindow;
+
+    for (let i = startIdx; i < data.length - halfWindow; i++) {
+        // Current window: centered around point i
+        const currentStart = i - halfWindow;
+        const currentEnd = i + halfWindow + 1;
+        const currentWindow = data.slice(currentStart, currentEnd);
+        const currentAvg = currentWindow.reduce((a, b) => a + b, 0) / currentWindow.length;
+
+        // Reference window: centered around point (i - offset)
+        const refCenter = i - offset;
+        const refStart = refCenter - halfWindow;
+        const refEnd = refCenter + halfWindow + 1;
+        const refWindow = data.slice(refStart, refEnd);
+        const refAvg = refWindow.reduce((a, b) => a + b, 0) / refWindow.length;
+
+        // Avoid division by zero
+        if (refAvg === 0) continue;
+
+        // Calculate percentage change
+        const percentChange = ((currentAvg - refAvg) / Math.abs(refAvg)) * 100;
+        const absPercentChange = Math.abs(percentChange);
+
+        if (absPercentChange > threshold) {
+            // Avoid duplicate detections within window size
+            if (indices.length === 0 || i - indices[indices.length - 1] >= windowSize) {
+                indices.push(i);
+                details.push({
+                    index: i,
+                    currentAvg: currentAvg.toFixed(2),
+                    refAvg: refAvg.toFixed(2),
+                    percentChange: percentChange.toFixed(2),
+                    direction: percentChange > 0 ? 'increase' : 'decrease'
+                });
+            }
+        }
+    }
+
+    return { indices, details };
+}
+
+/**
  * Boundary/Threshold Change Point Detection
  * Detects change points when values cross upper or lower boundaries
  * Only triggers once per boundary crossing (not for every point outside bounds)
@@ -799,6 +867,25 @@ function updateChart(data) {
         }
     });
 
+    // Run Sliding Window detection if enabled
+    const runSlidingWindow = runSlidingWindowCheckbox.checked;
+    const slidingWindowSize = parseInt(slidingWindowSizeInput.value);
+    const slidingWindowOffset = parseInt(slidingWindowOffsetInput.value);
+    const slidingWindowThreshold = parseFloat(slidingWindowThresholdInput.value);
+    const slidingWindowResult = runSlidingWindow ? detectChangePointsSlidingWindow(values, slidingWindowSize, slidingWindowOffset, slidingWindowThreshold) : { indices: [], details: [] };
+    const slidingWindowDetectedIndices = slidingWindowResult.indices;
+
+    // Determine matched pairs for Sliding Window coloring
+    const slidingWindowMatchedIndices = new Set();
+    slidingWindowDetectedIndices.forEach(swIdx => {
+        for (const gtIdx of groundTruthIndices) {
+            if (Math.abs(swIdx - gtIdx) <= DEFAULT_TOLERANCE) {
+                slidingWindowMatchedIndices.add(swIdx);
+                break;
+            }
+        }
+    });
+
     // Create ground truth annotations (shared by all charts)
     const createAnnotations = () => {
         const annotations = {};
@@ -882,6 +969,7 @@ function updateChart(data) {
     if (runMa) enabledMethods.push('ma');
     if (runBoundary) enabledMethods.push('boundary');
     if (runThreshold) enabledMethods.push('threshold');
+    if (runSlidingWindow) enabledMethods.push('slidingWindow');
 
     // Create Otava chart if enabled
     if (runOtavaCheckbox.checked) {
@@ -1125,6 +1213,59 @@ function updateChart(data) {
                     pointRadius: thresholdPointRadii,
                     pointHoverRadius: 8,
                     pointStyle: thresholdPointStyles,
+                }]
+            },
+            options: getChartOptions(createAnnotations(), isLast)
+        });
+        stackedCharts.push(chart);
+    }
+
+    // Create Sliding Window chart if enabled
+    if (runSlidingWindow) {
+        const slidingWindowTp = slidingWindowMatchedIndices.size;
+        const slidingWindowFp = slidingWindowDetectedIndices.length - slidingWindowTp;
+        const canvas = createChartContainer('slidingWindow', `Sliding Window (N=${slidingWindowSize}, M=${slidingWindowOffset}, >${slidingWindowThreshold}%)`, '#14b8a6', slidingWindowTp, slidingWindowFp);
+        const ctx = canvas.getContext('2d');
+
+        const slidingWindowPointColors = values.map((_, i) => {
+            if (slidingWindowDetectedIndices.includes(i)) {
+                return slidingWindowMatchedIndices.has(i) ? '#f87171' : '#f97316';
+            }
+            return 'transparent';
+        });
+        const slidingWindowPointBorders = values.map((_, i) => {
+            if (slidingWindowDetectedIndices.includes(i)) {
+                return slidingWindowMatchedIndices.has(i) ? '#ef4444' : '#ea580c';
+            }
+            return 'transparent';
+        });
+        const slidingWindowPointRadii = values.map((_, i) => slidingWindowDetectedIndices.includes(i) ? 6 : 0);
+        const slidingWindowPointStyles = values.map((_, i) => {
+            if (slidingWindowDetectedIndices.includes(i)) {
+                return slidingWindowMatchedIndices.has(i) ? 'circle' : 'triangle';
+            }
+            return 'circle';
+        });
+
+        const isLast = enabledMethods[enabledMethods.length - 1] === 'slidingWindow';
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Sliding Window Detection',
+                    data: values,
+                    borderColor: '#94a3b8',
+                    backgroundColor: 'rgba(148, 163, 184, 0.1)',
+                    borderWidth: 1.5,
+                    fill: true,
+                    tension: 0,
+                    pointBackgroundColor: slidingWindowPointColors,
+                    pointBorderColor: slidingWindowPointBorders,
+                    pointBorderWidth: 1.5,
+                    pointRadius: slidingWindowPointRadii,
+                    pointHoverRadius: 8,
+                    pointStyle: slidingWindowPointStyles,
                 }]
             },
             options: getChartOptions(createAnnotations(), isLast)
