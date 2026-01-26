@@ -871,6 +871,14 @@ footer a:hover {
     height: 10px;
 }
 
+.legend-marker.close-match {
+    background: #fde047;
+    border: 2px solid #eab308;
+    width: 10px;
+    height: 10px;
+    transform: rotate(45deg);
+}
+
 .legend-marker.false-positive {
     background: transparent;
     border-radius: 0;

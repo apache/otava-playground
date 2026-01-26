@@ -54,7 +54,8 @@ const slidingWindowOffsetInput = document.getElementById('sliding-window-offset-
 const slidingWindowThresholdInput = document.getElementById('sliding-window-threshold-input');
 
 // Default match tolerance for comparing detected vs ground truth change points
-const DEFAULT_TOLERANCE = 0;
+const DEFAULT_TOLERANCE = 0;  // Exact match for True Positive
+const CLOSE_MATCH_TOLERANCE = 5;  // Within 5 points for Close Match
 
 // DOM Elements - Actions
 const generateBtn = document.getElementById('generate-btn');
@@ -789,6 +790,47 @@ async function generateData() {
     }
 }
 
+/**
+ * Classify detected indices into exact matches, close matches, and false positives
+ * @param {number[]} detectedIndices - Array of detected change point indices
+ * @param {number[]} groundTruthIndices - Array of ground truth change point indices
+ * @returns {Object} Object with exactMatches, closeMatches sets and counts
+ */
+function classifyDetections(detectedIndices, groundTruthIndices) {
+    const exactMatches = new Set();
+    const closeMatches = new Set();
+    const usedGroundTruth = new Set();
+
+    // First pass: find exact matches
+    detectedIndices.forEach(dIdx => {
+        for (const gtIdx of groundTruthIndices) {
+            if (!usedGroundTruth.has(gtIdx) && Math.abs(dIdx - gtIdx) <= DEFAULT_TOLERANCE) {
+                exactMatches.add(dIdx);
+                usedGroundTruth.add(gtIdx);
+                break;
+            }
+        }
+    });
+
+    // Second pass: find close matches (not already exact)
+    detectedIndices.forEach(dIdx => {
+        if (exactMatches.has(dIdx)) return;
+        for (const gtIdx of groundTruthIndices) {
+            if (!usedGroundTruth.has(gtIdx) && Math.abs(dIdx - gtIdx) <= CLOSE_MATCH_TOLERANCE) {
+                closeMatches.add(dIdx);
+                usedGroundTruth.add(gtIdx);
+                break;
+            }
+        }
+    });
+
+    const tp = exactMatches.size;
+    const cm = closeMatches.size;
+    const fp = detectedIndices.length - tp - cm;
+
+    return { exactMatches, closeMatches, tp, cm, fp };
+}
+
 // Update the stacked charts - one per enabled analysis method
 function updateChart(data) {
     // Destroy existing charts
@@ -816,20 +858,11 @@ function updateChart(data) {
     const maResult = runMa ? detectChangePointsMA(values, maWindow, maThreshold) : { indices: [], details: [] };
     const maDetectedIndices = maResult.indices;
 
-    // Determine matched pairs for Otava coloring
-    const matchedPairs = data.accuracy?.matched_pairs || [];
-    const matchedDetected = new Set(matchedPairs.map(p => p.detected));
+    // Classify Otava detections
+    const otavaClassification = classifyDetections(detectedIndices, groundTruthIndices);
 
-    // Determine matched pairs for MA coloring
-    const maMatchedIndices = new Set();
-    maDetectedIndices.forEach(maIdx => {
-        for (const gtIdx of groundTruthIndices) {
-            if (Math.abs(maIdx - gtIdx) <= DEFAULT_TOLERANCE) {
-                maMatchedIndices.add(maIdx);
-                break;
-            }
-        }
-    });
+    // Classify MA detections
+    const maClassification = classifyDetections(maDetectedIndices, groundTruthIndices);
 
     // Run Boundary detection if enabled
     const runBoundary = runBoundaryCheckbox.checked;
@@ -838,16 +871,8 @@ function updateChart(data) {
     const boundaryResult = runBoundary ? detectChangePointsBoundary(values, upperBound, lowerBound) : { indices: [], details: [] };
     const boundaryDetectedIndices = boundaryResult.indices;
 
-    // Determine matched pairs for Boundary coloring
-    const boundaryMatchedIndices = new Set();
-    boundaryDetectedIndices.forEach(bIdx => {
-        for (const gtIdx of groundTruthIndices) {
-            if (Math.abs(bIdx - gtIdx) <= DEFAULT_TOLERANCE) {
-                boundaryMatchedIndices.add(bIdx);
-                break;
-            }
-        }
-    });
+    // Classify Boundary detections
+    const boundaryClassification = classifyDetections(boundaryDetectedIndices, groundTruthIndices);
 
     // Run Threshold Alert detection if enabled
     const runThreshold = runThresholdCheckbox.checked;
@@ -856,16 +881,8 @@ function updateChart(data) {
     const thresholdResult = runThreshold ? detectChangePointsThreshold(values, thresholdPercent, thresholdOffset) : { indices: [], details: [] };
     const thresholdDetectedIndices = thresholdResult.indices;
 
-    // Determine matched pairs for Threshold Alert coloring
-    const thresholdMatchedIndices = new Set();
-    thresholdDetectedIndices.forEach(tIdx => {
-        for (const gtIdx of groundTruthIndices) {
-            if (Math.abs(tIdx - gtIdx) <= DEFAULT_TOLERANCE) {
-                thresholdMatchedIndices.add(tIdx);
-                break;
-            }
-        }
-    });
+    // Classify Threshold detections
+    const thresholdClassification = classifyDetections(thresholdDetectedIndices, groundTruthIndices);
 
     // Run Sliding Window detection if enabled
     const runSlidingWindow = runSlidingWindowCheckbox.checked;
@@ -875,16 +892,8 @@ function updateChart(data) {
     const slidingWindowResult = runSlidingWindow ? detectChangePointsSlidingWindow(values, slidingWindowSize, slidingWindowOffset, slidingWindowThreshold) : { indices: [], details: [] };
     const slidingWindowDetectedIndices = slidingWindowResult.indices;
 
-    // Determine matched pairs for Sliding Window coloring
-    const slidingWindowMatchedIndices = new Set();
-    slidingWindowDetectedIndices.forEach(swIdx => {
-        for (const gtIdx of groundTruthIndices) {
-            if (Math.abs(swIdx - gtIdx) <= DEFAULT_TOLERANCE) {
-                slidingWindowMatchedIndices.add(swIdx);
-                break;
-            }
-        }
-    });
+    // Classify Sliding Window detections
+    const slidingWindowClassification = classifyDetections(slidingWindowDetectedIndices, groundTruthIndices);
 
     // Create ground truth annotations (shared by all charts)
     const createAnnotations = () => {
@@ -913,7 +922,7 @@ function updateChart(data) {
     };
 
     // Helper to create a chart container
-    const createChartContainer = (id, title, color, tpCount, fpCount) => {
+    const createChartContainer = (id, title, color, tpCount, cmCount, fpCount) => {
         const container = document.createElement('div');
         container.className = 'stacked-chart';
         container.id = `chart-${id}`;
@@ -925,6 +934,7 @@ function updateChart(data) {
             <h4>${title}</h4>
             <span class="detection-count">
                 <strong style="color: #ef4444">${tpCount} TP</strong> /
+                <strong style="color: #eab308">${cmCount} CM</strong> /
                 <strong style="color: #f97316">${fpCount} FP</strong>
             </span>
         `;
@@ -973,27 +983,32 @@ function updateChart(data) {
 
     // Create Otava chart if enabled
     if (runOtavaCheckbox.checked) {
-        const otavaTp = matchedDetected.size;
-        const otavaFp = detectedIndices.length - otavaTp;
-        const canvas = createChartContainer('otava', 'Otava Analysis', '#2563eb', otavaTp, otavaFp);
+        const { tp: otavaTp, cm: otavaCm, fp: otavaFp, exactMatches: otavaExact, closeMatches: otavaClose } = otavaClassification;
+        const canvas = createChartContainer('otava', 'Otava Analysis', '#2563eb', otavaTp, otavaCm, otavaFp);
         const ctx = canvas.getContext('2d');
 
         const otavaPointColors = values.map((_, i) => {
             if (detectedIndices.includes(i)) {
-                return matchedDetected.has(i) ? '#f87171' : '#f97316';
+                if (otavaExact.has(i)) return '#f87171';  // TP - red
+                if (otavaClose.has(i)) return '#fde047';  // CM - yellow
+                return '#f97316';  // FP - orange
             }
             return 'transparent';
         });
         const otavaPointBorders = values.map((_, i) => {
             if (detectedIndices.includes(i)) {
-                return matchedDetected.has(i) ? '#ef4444' : '#ea580c';
+                if (otavaExact.has(i)) return '#ef4444';
+                if (otavaClose.has(i)) return '#eab308';
+                return '#ea580c';
             }
             return 'transparent';
         });
         const otavaPointRadii = values.map((_, i) => detectedIndices.includes(i) ? 6 : 0);
         const otavaPointStyles = values.map((_, i) => {
             if (detectedIndices.includes(i)) {
-                return matchedDetected.has(i) ? 'circle' : 'triangle';
+                if (otavaExact.has(i)) return 'circle';  // TP
+                if (otavaClose.has(i)) return 'rectRot';  // CM - diamond
+                return 'triangle';  // FP
             }
             return 'circle';
         });
@@ -1026,27 +1041,32 @@ function updateChart(data) {
 
     // Create MA chart if enabled
     if (runMa) {
-        const maTp = maMatchedIndices.size;
-        const maFp = maDetectedIndices.length - maTp;
-        const canvas = createChartContainer('ma', 'Moving Average Analysis', '#8b5cf6', maTp, maFp);
+        const { tp: maTp, cm: maCm, fp: maFp, exactMatches: maExact, closeMatches: maClose } = maClassification;
+        const canvas = createChartContainer('ma', 'Moving Average Analysis', '#8b5cf6', maTp, maCm, maFp);
         const ctx = canvas.getContext('2d');
 
         const maPointColors = values.map((_, i) => {
             if (maDetectedIndices.includes(i)) {
-                return maMatchedIndices.has(i) ? '#f87171' : '#f97316';
+                if (maExact.has(i)) return '#f87171';
+                if (maClose.has(i)) return '#fde047';
+                return '#f97316';
             }
             return 'transparent';
         });
         const maPointBorders = values.map((_, i) => {
             if (maDetectedIndices.includes(i)) {
-                return maMatchedIndices.has(i) ? '#ef4444' : '#ea580c';
+                if (maExact.has(i)) return '#ef4444';
+                if (maClose.has(i)) return '#eab308';
+                return '#ea580c';
             }
             return 'transparent';
         });
         const maPointRadii = values.map((_, i) => maDetectedIndices.includes(i) ? 6 : 0);
         const maPointStyles = values.map((_, i) => {
             if (maDetectedIndices.includes(i)) {
-                return maMatchedIndices.has(i) ? 'circle' : 'triangle';
+                if (maExact.has(i)) return 'circle';
+                if (maClose.has(i)) return 'rectRot';
+                return 'triangle';
             }
             return 'circle';
         });
@@ -1079,27 +1099,32 @@ function updateChart(data) {
 
     // Create Boundary chart if enabled
     if (runBoundary) {
-        const boundaryTp = boundaryMatchedIndices.size;
-        const boundaryFp = boundaryDetectedIndices.length - boundaryTp;
-        const canvas = createChartContainer('boundary', 'Boundary Analysis', '#06b6d4', boundaryTp, boundaryFp);
+        const { tp: boundaryTp, cm: boundaryCm, fp: boundaryFp, exactMatches: boundaryExact, closeMatches: boundaryClose } = boundaryClassification;
+        const canvas = createChartContainer('boundary', 'Boundary Analysis', '#06b6d4', boundaryTp, boundaryCm, boundaryFp);
         const ctx = canvas.getContext('2d');
 
         const boundaryPointColors = values.map((_, i) => {
             if (boundaryDetectedIndices.includes(i)) {
-                return boundaryMatchedIndices.has(i) ? '#f87171' : '#f97316';
+                if (boundaryExact.has(i)) return '#f87171';
+                if (boundaryClose.has(i)) return '#fde047';
+                return '#f97316';
             }
             return 'transparent';
         });
         const boundaryPointBorders = values.map((_, i) => {
             if (boundaryDetectedIndices.includes(i)) {
-                return boundaryMatchedIndices.has(i) ? '#ef4444' : '#ea580c';
+                if (boundaryExact.has(i)) return '#ef4444';
+                if (boundaryClose.has(i)) return '#eab308';
+                return '#ea580c';
             }
             return 'transparent';
         });
         const boundaryPointRadii = values.map((_, i) => boundaryDetectedIndices.includes(i) ? 6 : 0);
         const boundaryPointStyles = values.map((_, i) => {
             if (boundaryDetectedIndices.includes(i)) {
-                return boundaryMatchedIndices.has(i) ? 'circle' : 'triangle';
+                if (boundaryExact.has(i)) return 'circle';
+                if (boundaryClose.has(i)) return 'rectRot';
+                return 'triangle';
             }
             return 'circle';
         });
@@ -1169,27 +1194,32 @@ function updateChart(data) {
 
     // Create Threshold Alert chart if enabled
     if (runThreshold) {
-        const thresholdTp = thresholdMatchedIndices.size;
-        const thresholdFp = thresholdDetectedIndices.length - thresholdTp;
-        const canvas = createChartContainer('threshold', `Threshold Alert (>${thresholdPercent}%, offset=${thresholdOffset})`, '#ec4899', thresholdTp, thresholdFp);
+        const { tp: thresholdTp, cm: thresholdCm, fp: thresholdFp, exactMatches: thresholdExact, closeMatches: thresholdClose } = thresholdClassification;
+        const canvas = createChartContainer('threshold', `Threshold Alert (>${thresholdPercent}%, offset=${thresholdOffset})`, '#ec4899', thresholdTp, thresholdCm, thresholdFp);
         const ctx = canvas.getContext('2d');
 
         const thresholdPointColors = values.map((_, i) => {
             if (thresholdDetectedIndices.includes(i)) {
-                return thresholdMatchedIndices.has(i) ? '#f87171' : '#f97316';
+                if (thresholdExact.has(i)) return '#f87171';
+                if (thresholdClose.has(i)) return '#fde047';
+                return '#f97316';
             }
             return 'transparent';
         });
         const thresholdPointBorders = values.map((_, i) => {
             if (thresholdDetectedIndices.includes(i)) {
-                return thresholdMatchedIndices.has(i) ? '#ef4444' : '#ea580c';
+                if (thresholdExact.has(i)) return '#ef4444';
+                if (thresholdClose.has(i)) return '#eab308';
+                return '#ea580c';
             }
             return 'transparent';
         });
         const thresholdPointRadii = values.map((_, i) => thresholdDetectedIndices.includes(i) ? 6 : 0);
         const thresholdPointStyles = values.map((_, i) => {
             if (thresholdDetectedIndices.includes(i)) {
-                return thresholdMatchedIndices.has(i) ? 'circle' : 'triangle';
+                if (thresholdExact.has(i)) return 'circle';
+                if (thresholdClose.has(i)) return 'rectRot';
+                return 'triangle';
             }
             return 'circle';
         });
@@ -1222,27 +1252,32 @@ function updateChart(data) {
 
     // Create Sliding Window chart if enabled
     if (runSlidingWindow) {
-        const slidingWindowTp = slidingWindowMatchedIndices.size;
-        const slidingWindowFp = slidingWindowDetectedIndices.length - slidingWindowTp;
-        const canvas = createChartContainer('slidingWindow', `Sliding Window (N=${slidingWindowSize}, M=${slidingWindowOffset}, >${slidingWindowThreshold}%)`, '#14b8a6', slidingWindowTp, slidingWindowFp);
+        const { tp: slidingWindowTp, cm: slidingWindowCm, fp: slidingWindowFp, exactMatches: slidingWindowExact, closeMatches: slidingWindowClose } = slidingWindowClassification;
+        const canvas = createChartContainer('slidingWindow', `Sliding Window (N=${slidingWindowSize}, M=${slidingWindowOffset}, >${slidingWindowThreshold}%)`, '#14b8a6', slidingWindowTp, slidingWindowCm, slidingWindowFp);
         const ctx = canvas.getContext('2d');
 
         const slidingWindowPointColors = values.map((_, i) => {
             if (slidingWindowDetectedIndices.includes(i)) {
-                return slidingWindowMatchedIndices.has(i) ? '#f87171' : '#f97316';
+                if (slidingWindowExact.has(i)) return '#f87171';
+                if (slidingWindowClose.has(i)) return '#fde047';
+                return '#f97316';
             }
             return 'transparent';
         });
         const slidingWindowPointBorders = values.map((_, i) => {
             if (slidingWindowDetectedIndices.includes(i)) {
-                return slidingWindowMatchedIndices.has(i) ? '#ef4444' : '#ea580c';
+                if (slidingWindowExact.has(i)) return '#ef4444';
+                if (slidingWindowClose.has(i)) return '#eab308';
+                return '#ea580c';
             }
             return 'transparent';
         });
         const slidingWindowPointRadii = values.map((_, i) => slidingWindowDetectedIndices.includes(i) ? 6 : 0);
         const slidingWindowPointStyles = values.map((_, i) => {
             if (slidingWindowDetectedIndices.includes(i)) {
-                return slidingWindowMatchedIndices.has(i) ? 'circle' : 'triangle';
+                if (slidingWindowExact.has(i)) return 'circle';
+                if (slidingWindowClose.has(i)) return 'rectRot';
+                return 'triangle';
             }
             return 'circle';
         });
@@ -1284,7 +1319,7 @@ function updateChart(data) {
 
     // Store MA result for stats display
     data._maResult = maResult;
-    data._maMatchedIndices = maMatchedIndices;
+    data._maClassification = maClassification;
 }
 
 // Update statistics display
