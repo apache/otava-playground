@@ -10,6 +10,14 @@ let generators = {};
 let selectedGenerator = null;
 let generatorTileCharts = {};  // Mini charts for generator tiles
 
+// Mix Mode State
+let mixMode = false;              // Single Pattern vs Mix Patterns mode
+let mixOperation = 'sum';         // 'sum' or 'append'
+let mixComponents = [];           // [{name, data, changePoints, params, count}]
+let mixedData = null;             // Combined data array
+let mixedChangePoints = [];       // Merged ground truth change points
+let tileBadges = {};              // Track count badges on tiles
+
 // DOM Elements - Data Generation
 const generatorGrid = document.getElementById('generator-grid');
 const lengthSlider = document.getElementById('length-slider');
@@ -18,6 +26,13 @@ const lengthMin = document.getElementById('length-min');
 const lengthMax = document.getElementById('length-max');
 const seedInput = document.getElementById('seed-input');
 const dynamicParams = document.getElementById('dynamic-params');
+
+// DOM Elements - Mix Mode
+const modeSingleBtn = document.getElementById('mode-single-btn');
+const modeMixBtn = document.getElementById('mode-mix-btn');
+const mixInfo = document.getElementById('mix-info');
+const mixRecipe = document.getElementById('mix-recipe');
+const clearMixBtn = document.getElementById('clear-mix-btn');
 
 // DOM Elements - Otava Controls
 const runOtavaCheckbox = document.getElementById('run-otava-checkbox');
@@ -139,124 +154,174 @@ async function populateGeneratorGrid() {
     const previewData = {};
     previews.forEach(p => { previewData[p.name] = p.data; });
 
-    // Custom ordering with four rows:
-    // Row 1: Clean single patterns
-    // Row 2: Clean multiple patterns (with placeholder for Constant)
-    // Row 3: Normal noise single patterns
-    // Row 4: Uniform noise single patterns
     const generatorNames = Object.keys(generators);
-    const orderedNames = [];
 
-    // Row 1 - single clean patterns
-    const row1Order = [
-        'constant',
-        'outlier_clean',
-        'step_function_clean',
-        'regression_fix_clean',
-        'variance_change_clean',
-        'phase_change_clean',
-        'banding_clean'
-    ];
-    const row1Names = row1Order.filter(name => generatorNames.includes(name));
-    orderedNames.push(...row1Names);
+    if (mixMode) {
+        // Mix mode layout: Single row with clean patterns + noise + operation toggle
+        const mixRow1Order = [
+            'constant',
+            'noise_normal',
+            'noise_uniform',
+            'outlier_clean',
+            'step_function_clean',
+            'regression_fix_clean',
+            'variance_change_clean',
+            'phase_change_clean',
+            'banding_clean'
+        ];
+        const mixRow1Names = mixRow1Order.filter(name => generatorNames.includes(name));
 
-    // Row 2 - multiple clean patterns (with placeholder)
-    const row2Order = [
-        '__placeholder__',
-        'multiple_outliers_clean',
-        'multiple_changes_clean',
-        'multiple_regression_fix_clean',
-        'multiple_variance_changes_clean',
-        'multiple_phase_changes_clean',
-        'multiple_banding_clean'
-    ];
-    const row2Names = row2Order.filter(name =>
-        name === '__placeholder__' || generatorNames.includes(name)
-    );
-    orderedNames.push(...row2Names);
-
-    // Row 3 - normal noise single patterns
-    const row3Order = [
-        'noise_normal',
-        'outlier',
-        'step_function',
-        'regression_fix',
-        'variance_change',
-        'phase_change',
-        'banding'
-    ];
-    const row3Names = row3Order.filter(name => generatorNames.includes(name));
-    orderedNames.push(...row3Names);
-
-    // Row 4 - uniform noise single patterns
-    const row4Order = [
-        'noise_uniform',
-        'outlier_uniform',
-        'step_function_uniform',
-        'regression_fix_uniform',
-        'variance_change_uniform',
-        'phase_change_uniform',
-        'banding_uniform'
-    ];
-    const row4Names = row4Order.filter(name => generatorNames.includes(name));
-    orderedNames.push(...row4Names);
-
-    // Track line break positions
-    const row1EndIndex = row1Names.length;
-    const row2EndIndex = row1Names.length + row2Names.length;
-    const row3EndIndex = row1Names.length + row2Names.length + row3Names.length;
-    const row4EndIndex = row1Names.length + row2Names.length + row3Names.length + row4Names.length;
-
-    // Create tiles for each generator in order
-    let tileIndex = 0;
-    for (const name of orderedNames) {
-        tileIndex++;
-
-        // Handle placeholder tile (empty space for alignment)
-        if (name === '__placeholder__') {
-            const placeholder = document.createElement('div');
-            placeholder.className = 'generator-tile placeholder';
-            generatorGrid.appendChild(placeholder);
-            continue;
+        // Create pattern tiles
+        for (const name of mixRow1Names) {
+            const info = generators[name];
+            const tile = createGeneratorTile(name, info, previewData[name], true);
+            generatorGrid.appendChild(tile);
         }
 
-        const info = generators[name];
-        const tile = document.createElement('div');
-        tile.className = 'generator-tile' + (name === selectedGenerator ? ' selected' : '');
-        tile.dataset.generator = name;
+        // Operation toggle tile at the end
+        const opTile = document.createElement('div');
+        opTile.className = 'generator-tile operation-tile';
+        opTile.innerHTML = `
+            <div class="op-label">${mixOperation.toUpperCase()}</div>
+            <div class="op-hint">Click to toggle</div>
+        `;
+        opTile.addEventListener('click', toggleMixOperation);
+        generatorGrid.appendChild(opTile);
 
-        // Preview container
-        const preview = document.createElement('div');
-        preview.className = 'generator-tile-preview';
-        const canvas = document.createElement('canvas');
-        canvas.id = `preview-${name}`;
-        preview.appendChild(canvas);
+        // Update badges for existing mix components
+        updateTileBadges();
 
-        // Name label
-        const label = document.createElement('div');
-        label.className = 'generator-tile-name';
-        label.textContent = info.name;
+    } else {
+        // Single mode layout: Original 4 rows
+        const orderedNames = [];
 
-        tile.appendChild(preview);
-        tile.appendChild(label);
-        generatorGrid.appendChild(tile);
+        // Row 1 - single clean patterns
+        const row1Order = [
+            'constant',
+            'outlier_clean',
+            'step_function_clean',
+            'regression_fix_clean',
+            'variance_change_clean',
+            'phase_change_clean',
+            'banding_clean'
+        ];
+        const row1Names = row1Order.filter(name => generatorNames.includes(name));
+        orderedNames.push(...row1Names);
 
-        // Add line breaks after each row
-        if (tileIndex === row1EndIndex || tileIndex === row2EndIndex ||
-            tileIndex === row3EndIndex || tileIndex === row4EndIndex) {
-            const lineBreak = document.createElement('div');
-            lineBreak.className = 'generator-grid-break';
-            generatorGrid.appendChild(lineBreak);
-        }
+        // Row 2 - multiple clean patterns (with placeholder)
+        const row2Order = [
+            '__placeholder__',
+            'multiple_outliers_clean',
+            'multiple_changes_clean',
+            'multiple_regression_fix_clean',
+            'multiple_variance_changes_clean',
+            'multiple_phase_changes_clean',
+            'multiple_banding_clean'
+        ];
+        const row2Names = row2Order.filter(name =>
+            name === '__placeholder__' || generatorNames.includes(name)
+        );
+        orderedNames.push(...row2Names);
 
-        // Click handler
-        tile.addEventListener('click', () => selectGenerator(name));
+        // Row 3 - normal noise single patterns
+        const row3Order = [
+            'noise_normal',
+            'outlier',
+            'step_function',
+            'regression_fix',
+            'variance_change',
+            'phase_change',
+            'banding'
+        ];
+        const row3Names = row3Order.filter(name => generatorNames.includes(name));
+        orderedNames.push(...row3Names);
 
-        // Create mini chart
-        if (previewData[name] && previewData[name].data) {
-            createTileChart(canvas, previewData[name].data, name === selectedGenerator);
+        // Row 4 - uniform noise single patterns
+        const row4Order = [
+            'noise_uniform',
+            'outlier_uniform',
+            'step_function_uniform',
+            'regression_fix_uniform',
+            'variance_change_uniform',
+            'phase_change_uniform',
+            'banding_uniform'
+        ];
+        const row4Names = row4Order.filter(name => generatorNames.includes(name));
+        orderedNames.push(...row4Names);
+
+        // Track line break positions
+        const row1EndIndex = row1Names.length;
+        const row2EndIndex = row1Names.length + row2Names.length;
+        const row3EndIndex = row1Names.length + row2Names.length + row3Names.length;
+        const row4EndIndex = row1Names.length + row2Names.length + row3Names.length + row4Names.length;
+
+        // Create tiles for each generator in order
+        let tileIndex = 0;
+        for (const name of orderedNames) {
+            tileIndex++;
+
+            // Handle placeholder tile (empty space for alignment)
+            if (name === '__placeholder__') {
+                const placeholder = document.createElement('div');
+                placeholder.className = 'generator-tile placeholder';
+                generatorGrid.appendChild(placeholder);
+                continue;
+            }
+
+            const info = generators[name];
+            const tile = createGeneratorTile(name, info, previewData[name], false);
+            generatorGrid.appendChild(tile);
+
+            // Add line breaks after each row
+            if (tileIndex === row1EndIndex || tileIndex === row2EndIndex ||
+                tileIndex === row3EndIndex || tileIndex === row4EndIndex) {
+                const lineBreak = document.createElement('div');
+                lineBreak.className = 'generator-grid-break';
+                generatorGrid.appendChild(lineBreak);
+            }
         }
     }
+
+    // Apply mix mode class to grid
+    generatorGrid.classList.toggle('mix-mode', mixMode);
+}
+
+/**
+ * Create a generator tile element
+ */
+function createGeneratorTile(name, info, preview, isMixMode) {
+    const tile = document.createElement('div');
+    tile.className = 'generator-tile' + (!isMixMode && name === selectedGenerator ? ' selected' : '');
+    tile.dataset.generator = name;
+
+    // Preview container
+    const previewDiv = document.createElement('div');
+    previewDiv.className = 'generator-tile-preview';
+    const canvas = document.createElement('canvas');
+    canvas.id = `preview-${name}`;
+    previewDiv.appendChild(canvas);
+
+    // Name label
+    const label = document.createElement('div');
+    label.className = 'generator-tile-name';
+    label.textContent = info.name;
+
+    tile.appendChild(previewDiv);
+    tile.appendChild(label);
+
+    // Click handler - different for mix mode vs single mode
+    if (isMixMode) {
+        tile.addEventListener('click', () => addToMix(name));
+    } else {
+        tile.addEventListener('click', () => selectGenerator(name));
+    }
+
+    // Create mini chart
+    if (preview && preview.data) {
+        createTileChart(canvas, preview.data, !isMixMode && name === selectedGenerator);
+    }
+
+    return tile;
 }
 
 // Create a mini chart for a generator tile
@@ -420,6 +485,11 @@ function setupEventListeners() {
     generateBtn.addEventListener('click', generateData);
     showAllBtn.addEventListener('click', showAllPatterns);
 
+    // Mix mode controls
+    modeSingleBtn.addEventListener('click', () => toggleMixMode(false));
+    modeMixBtn.addEventListener('click', () => toggleMixMode(true));
+    clearMixBtn.addEventListener('click', clearMix);
+
     // Otava controls
     runOtavaCheckbox.addEventListener('change', generateData);
     windowLenInput.addEventListener('change', generateData);
@@ -460,6 +530,21 @@ function setupEventListeners() {
 
 // Update generator info display
 function updateGeneratorInfo() {
+    if (mixMode && mixComponents.length > 0) {
+        // Mix mode with components
+        const totalCPs = mixedChangePoints ? mixedChangePoints.filter(cp => cp.type !== 'outlier').length : 0;
+        generatorTitle.textContent = 'Mixed Pattern';
+        const opText = mixOperation === 'sum' ? 'Sum' : 'Append';
+        generatorDescription.textContent = `${mixComponents.length} component(s) combined using ${opText} operation`;
+
+        if (totalCPs > 0) {
+            changePointInfo.classList.remove('hidden');
+        } else {
+            changePointInfo.classList.add('hidden');
+        }
+        return;
+    }
+
     const name = selectedGenerator;
     const info = generators[name];
 
@@ -1836,6 +1921,533 @@ async function showAllPatterns() {
         console.error('Failed to load all patterns:', error);
     } finally {
         document.body.classList.remove('loading');
+    }
+}
+
+// ==========================================
+// Mix Mode Functions
+// ==========================================
+
+/**
+ * Toggle between Single Pattern and Mix Patterns mode
+ */
+function toggleMixMode(enable) {
+    mixMode = enable;
+
+    // Update button states
+    modeSingleBtn.classList.toggle('active', !enable);
+    modeMixBtn.classList.toggle('active', enable);
+
+    // Toggle mix info visibility
+    mixInfo.classList.toggle('hidden', !enable);
+
+    // Toggle grid class
+    generatorGrid.classList.toggle('mix-mode', enable);
+
+    // Clear mix state when switching modes
+    if (enable) {
+        clearMix();
+        updateMixDisplay();
+    } else {
+        // Clear badges and restore normal tile behavior
+        clearMix();
+        // Re-render the selected generator in single mode
+        if (selectedGenerator) {
+            generateData();
+        }
+    }
+
+    // Rebuild grid for mix mode layout
+    populateGeneratorGrid();
+}
+
+/**
+ * Toggle between Sum and Append operations
+ */
+function toggleMixOperation() {
+    mixOperation = mixOperation === 'sum' ? 'append' : 'sum';
+    updateMixDisplay();
+    if (mixComponents.length > 0) {
+        computeAndDisplayMixedData();
+    }
+    // Update the operation tile
+    const opTile = document.querySelector('.operation-tile');
+    if (opTile) {
+        const opLabel = opTile.querySelector('.op-label');
+        if (opLabel) {
+            opLabel.textContent = mixOperation.toUpperCase();
+        }
+    }
+}
+
+/**
+ * Patterns that should have randomized x-axis positions when added to mix
+ */
+const RANDOMIZE_POSITION_PATTERNS = [
+    'outlier', 'outlier_clean', 'outlier_uniform',
+    'step_function', 'step_function_clean', 'step_function_uniform',
+    'regression_fix', 'regression_fix_clean', 'regression_fix_uniform'
+];
+
+/**
+ * Shift an array by a given offset, padding with the first value (no wrapping)
+ * Positive offset shifts the pattern to the right
+ */
+function shiftArray(arr, offset) {
+    if (offset === 0) return [...arr];
+    const n = arr.length;
+    const firstVal = arr[0];
+
+    if (offset > 0) {
+        // Shift right: pad beginning with first value, truncate end
+        const padding = new Array(offset).fill(firstVal);
+        return [...padding, ...arr.slice(0, n - offset)];
+    } else {
+        // Shift left: truncate beginning, pad end with last value
+        const lastVal = arr[n - 1];
+        const padding = new Array(-offset).fill(lastVal);
+        return [...arr.slice(-offset), ...padding];
+    }
+}
+
+/**
+ * Add a generator to the mix
+ */
+async function addToMix(generatorName) {
+    const length = parseInt(lengthInput.value);
+    const seed = parseInt(seedInput.value);
+
+    try {
+        document.body.classList.add('loading');
+
+        // Fetch data for this generator
+        const params = new URLSearchParams({ length, seed });
+        const response = await fetch(`/api/generate/${generatorName}?${params}`);
+        const result = await response.json();
+
+        if (result.error) {
+            console.error('Error fetching generator data:', result.error);
+            return;
+        }
+
+        let data = result.data;
+        let changePoints = result.ground_truth?.change_points || result.change_points || [];
+
+        // For certain patterns, randomize the x-axis position by shifting the data
+        if (RANDOMIZE_POSITION_PATTERNS.includes(generatorName)) {
+            // Generate a random offset (can be positive or negative, avoiding edges)
+            const margin = Math.floor(length * 0.15);  // 15% margin from edges
+            const maxShift = Math.floor(length * 0.35);  // Max 35% shift in either direction
+            const randomOffset = Math.floor(Math.random() * (2 * maxShift + 1)) - maxShift;
+
+            // Shift the data array (no wrapping)
+            data = shiftArray(data, randomOffset);
+
+            // Adjust change point indices, clamping to valid range
+            changePoints = changePoints.map(cp => ({
+                ...cp,
+                index: Math.max(0, Math.min(length - 1, cp.index + randomOffset))
+            }));
+        }
+
+        // Check if this generator is already in the mix
+        const existingIdx = mixComponents.findIndex(c => c.name === generatorName);
+        if (existingIdx >= 0) {
+            // For patterns with randomized positions, always add as new instance
+            if (RANDOMIZE_POSITION_PATTERNS.includes(generatorName)) {
+                mixComponents[existingIdx].count++;
+                // Store additional instances with their own data/changePoints
+                if (!mixComponents[existingIdx].instances) {
+                    mixComponents[existingIdx].instances = [{
+                        data: mixComponents[existingIdx].data,
+                        changePoints: mixComponents[existingIdx].changePoints
+                    }];
+                }
+                mixComponents[existingIdx].instances.push({ data, changePoints });
+            } else {
+                // Increment count for non-randomized patterns
+                mixComponents[existingIdx].count++;
+            }
+        } else {
+            // Add new component
+            const component = {
+                name: generatorName,
+                displayName: generators[generatorName]?.name || generatorName,
+                data: data,
+                changePoints: changePoints,
+                params: { length, seed },
+                count: 1
+            };
+            // For randomizable patterns, track instances
+            if (RANDOMIZE_POSITION_PATTERNS.includes(generatorName)) {
+                component.instances = [{ data, changePoints }];
+            }
+            mixComponents.push(component);
+        }
+
+        // Update display
+        updateMixDisplay();
+        updateTileBadges();
+        computeAndDisplayMixedData();
+
+    } catch (error) {
+        console.error('Failed to add generator to mix:', error);
+    } finally {
+        document.body.classList.remove('loading');
+    }
+}
+
+/**
+ * Remove one instance of a generator from the mix
+ */
+function removeFromMix(generatorName) {
+    const idx = mixComponents.findIndex(c => c.name === generatorName);
+    if (idx >= 0) {
+        const comp = mixComponents[idx];
+        comp.count--;
+
+        // For patterns with instances, also remove the last instance
+        if (comp.instances && comp.instances.length > 0) {
+            comp.instances.pop();
+        }
+
+        if (comp.count <= 0) {
+            mixComponents.splice(idx, 1);
+        }
+
+        updateMixDisplay();
+        updateTileBadges();
+        if (mixComponents.length > 0) {
+            computeAndDisplayMixedData();
+        } else {
+            // Clear charts when no components
+            stackedChartsContainer.innerHTML = `
+                <div class="stacked-chart" style="text-align: center; padding: 2rem;">
+                    <p style="color: #64748b;">Click patterns to add to the mix...</p>
+                </div>
+            `;
+        }
+    }
+}
+
+/**
+ * Clear all mix state
+ */
+function clearMix() {
+    mixComponents = [];
+    mixedData = null;
+    mixedChangePoints = [];
+    mixOperation = 'sum';
+    tileBadges = {};
+    updateMixDisplay();
+    updateTileBadges();
+
+    if (mixMode) {
+        // Clear charts
+        stackedChartsContainer.innerHTML = `
+            <div class="stacked-chart" style="text-align: center; padding: 2rem;">
+                <p style="color: #64748b;">Click patterns to add to the mix...</p>
+            </div>
+        `;
+        // Reset generator info
+        generatorTitle.textContent = 'Mix Patterns';
+        generatorDescription.textContent = 'Click on patterns to combine them';
+        changePointInfo.classList.add('hidden');
+
+        // Update the operation tile
+        const opTile = document.querySelector('.operation-tile');
+        if (opTile) {
+            const opLabel = opTile.querySelector('.op-label');
+            if (opLabel) {
+                opLabel.textContent = 'SUM';
+            }
+        }
+    }
+}
+
+/**
+ * Sum operation: add data arrays element-wise, cycling shorter arrays
+ * Then normalize to keep the mean at a reasonable baseline
+ */
+function sumMix(components) {
+    if (components.length === 0) return { data: [], changePoints: [] };
+
+    // Calculate max length considering counts
+    let maxLen = 0;
+    for (const comp of components) {
+        maxLen = Math.max(maxLen, comp.data.length);
+    }
+
+    // Initialize result array
+    const result = new Array(maxLen).fill(0);
+    const allChangePoints = [];
+
+    // Add each component
+    for (const comp of components) {
+        if (comp.instances) {
+            // For patterns with randomized positions, use each instance's data
+            for (const instance of comp.instances) {
+                for (let j = 0; j < maxLen; j++) {
+                    result[j] += instance.data[j % instance.data.length];
+                }
+                // Collect change points from each instance
+                for (const cp of instance.changePoints) {
+                    allChangePoints.push({ ...cp });
+                }
+            }
+        } else {
+            // For regular patterns, use count
+            for (let i = 0; i < comp.count; i++) {
+                for (let j = 0; j < maxLen; j++) {
+                    result[j] += comp.data[j % comp.data.length];
+                }
+            }
+            // Collect change points (once per component type for non-instance patterns)
+            for (const cp of comp.changePoints) {
+                allChangePoints.push({ ...cp });
+            }
+        }
+    }
+
+    // Deduplicate change points by index+type
+    const changePointsMap = {};
+    for (const cp of allChangePoints) {
+        const key = `${cp.index}-${cp.type}`;
+        if (!changePointsMap[key]) {
+            changePointsMap[key] = cp;
+        }
+    }
+
+    // Normalize: shift the result so the mean matches the first component's mean
+    const firstData = components[0].instances ? components[0].instances[0].data : components[0].data;
+    const targetMean = firstData.reduce((a, b) => a + b, 0) / firstData.length;
+    const currentMean = result.reduce((a, b) => a + b, 0) / result.length;
+    const shift = targetMean - currentMean;
+
+    for (let i = 0; i < result.length; i++) {
+        result[i] += shift;
+    }
+
+    return {
+        data: result,
+        changePoints: Object.values(changePointsMap)
+    };
+}
+
+/**
+ * Append operation: concatenate data arrays, offsetting change points
+ */
+function appendMix(components) {
+    if (components.length === 0) return { data: [], changePoints: [] };
+
+    const result = [];
+    const changePoints = [];
+    let offset = 0;
+
+    for (const comp of components) {
+        if (comp.instances) {
+            // For patterns with randomized positions, use each instance
+            for (const instance of comp.instances) {
+                result.push(...instance.data);
+
+                for (const cp of instance.changePoints) {
+                    changePoints.push({
+                        ...cp,
+                        index: cp.index + offset,
+                        description: `${cp.description || cp.type} (from ${comp.displayName})`
+                    });
+                }
+
+                offset += instance.data.length;
+            }
+        } else {
+            // For regular patterns, use count
+            for (let i = 0; i < comp.count; i++) {
+                result.push(...comp.data);
+
+                for (const cp of comp.changePoints) {
+                    changePoints.push({
+                        ...cp,
+                        index: cp.index + offset,
+                        description: `${cp.description || cp.type} (from ${comp.displayName})`
+                    });
+                }
+
+                offset += comp.data.length;
+            }
+        }
+    }
+
+    return { data: result, changePoints };
+}
+
+/**
+ * Compute mixed data based on current operation
+ */
+function computeMixedData() {
+    if (mixComponents.length === 0) {
+        mixedData = null;
+        mixedChangePoints = [];
+        return;
+    }
+
+    const mixResult = mixOperation === 'sum'
+        ? sumMix(mixComponents)
+        : appendMix(mixComponents);
+
+    mixedData = mixResult.data;
+    mixedChangePoints = mixResult.changePoints;
+}
+
+/**
+ * Compute mixed data and display in charts
+ */
+async function computeAndDisplayMixedData() {
+    computeMixedData();
+
+    if (!mixedData || mixedData.length === 0) {
+        return;
+    }
+
+    // Create a fake response object to pass to updateChart
+    const fakeData = {
+        generator: 'mixed',
+        data: mixedData,
+        ground_truth: {
+            change_points: mixedChangePoints,
+            count: mixedChangePoints.filter(cp => cp.type !== 'outlier').length
+        },
+        otava: null,  // Will be computed by updateChart if checkbox is enabled
+    };
+
+    // Run Otava analysis on mixed data if enabled
+    if (runOtavaCheckbox.checked) {
+        try {
+            const params = new URLSearchParams({
+                window_len: windowLenInput.value,
+                max_pvalue: maxPvalueInput.value,
+            });
+            const response = await fetch(`/api/detect?${params}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ data: mixedData })
+            });
+            const otavaResult = await response.json();
+            if (!otavaResult.error) {
+                fakeData.otava = otavaResult;
+            }
+        } catch (error) {
+            console.error('Failed to run Otava on mixed data:', error);
+        }
+    }
+
+    updateChart(fakeData);
+    updateStats(fakeData);
+    updateAccuracyMetrics(fakeData);
+    updateMixComparisonTables(fakeData);
+    updateGeneratorInfo();
+
+    // Show chart sections
+    document.querySelector('.stacked-charts-container').classList.remove('hidden');
+    document.querySelector('.chart-legend').classList.remove('hidden');
+    statsSection.classList.remove('hidden');
+    accuracyMetrics.classList.remove('hidden');
+    cpDetail.classList.remove('hidden');
+    multiChartContainer.classList.add('hidden');
+}
+
+/**
+ * Update comparison tables for mix mode
+ */
+function updateMixComparisonTables(data) {
+    truthTableBody.innerHTML = '';
+    detectedTableBody.innerHTML = '';
+
+    const groundTruth = data.ground_truth?.change_points || [];
+    const detected = data.otava?.detected_change_points || [];
+
+    // Ground truth table
+    if (groundTruth.length === 0) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="4" class="empty-message">No ground truth change points</td>';
+        truthTableBody.appendChild(row);
+    } else {
+        groundTruth.forEach(cp => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><strong>${cp.index}</strong></td>
+                <td>${cp.type}</td>
+                <td>${cp.description || '-'}</td>
+                <td>-</td>
+            `;
+            truthTableBody.appendChild(row);
+        });
+    }
+
+    // Detected table
+    if (!detected || detected.length === 0) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="5" class="empty-message">No change points detected by Otava</td>';
+        detectedTableBody.appendChild(row);
+    } else {
+        detected.forEach(cp => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><strong>${cp.index}</strong></td>
+                <td>${cp.mean_before?.toFixed(2) || '-'}</td>
+                <td>${cp.mean_after?.toFixed(2) || '-'}</td>
+                <td>${cp.pvalue?.toExponential(2) || '-'}</td>
+                <td>-</td>
+            `;
+            detectedTableBody.appendChild(row);
+        });
+    }
+}
+
+/**
+ * Update the mix recipe display
+ */
+function updateMixDisplay() {
+    if (mixComponents.length === 0) {
+        mixRecipe.innerHTML = 'Click patterns to add...';
+        return;
+    }
+
+    const parts = mixComponents.map(comp => {
+        const countStr = comp.count > 1 ? `${comp.count}x ` : '';
+        return `<span class="component">${countStr}${comp.displayName}</span>`;
+    });
+
+    const opSymbol = mixOperation === 'sum' ? '+' : '&rarr;';
+    mixRecipe.innerHTML = parts.join(`<span class="operation"> ${opSymbol} </span>`);
+}
+
+/**
+ * Update count badges on tiles
+ */
+function updateTileBadges() {
+    // Remove all existing badges
+    document.querySelectorAll('.tile-count-badge').forEach(badge => badge.remove());
+
+    // Remove in-mix class from all tiles
+    document.querySelectorAll('.generator-tile').forEach(tile => {
+        tile.classList.remove('in-mix');
+    });
+
+    if (!mixMode) return;
+
+    // Add badges for components in mix
+    for (const comp of mixComponents) {
+        const tile = document.querySelector(`.generator-tile[data-generator="${comp.name}"]`);
+        if (tile) {
+            tile.classList.add('in-mix');
+            if (comp.count > 0) {
+                const badge = document.createElement('div');
+                badge.className = 'tile-count-badge';
+                badge.textContent = comp.count;
+                tile.appendChild(badge);
+            }
+        }
     }
 }
 

@@ -1241,6 +1241,172 @@ footer a:hover {
     height: 300px !important;
 }
 
+/* Mix Mode Styles */
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.section-header .section-title {
+    margin: 0;
+}
+
+.mode-toggle {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.mode-btn {
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.mode-btn:hover {
+    background: var(--background);
+    border-color: var(--secondary-color);
+}
+
+.mode-btn.active {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+/* Mix info panel */
+.mix-info {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.5rem 0.75rem;
+    background: linear-gradient(135deg, #1e3a5f, #1e293b);
+    border-radius: 6px;
+    margin-bottom: 0.5rem;
+}
+
+.mix-info.hidden {
+    display: none;
+}
+
+.mix-recipe {
+    color: #94a3b8;
+    font-size: 0.85rem;
+    flex: 1;
+}
+
+.mix-recipe .component {
+    color: #60a5fa;
+    font-weight: 600;
+}
+
+.mix-recipe .operation {
+    color: #f97316;
+    font-weight: 600;
+    padding: 0 0.25rem;
+}
+
+.clear-mix-btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.clear-mix-btn:hover {
+    background: rgba(239, 68, 68, 0.3);
+    border-color: rgba(239, 68, 68, 0.5);
+}
+
+/* Hidden rows in mix mode */
+.generator-grid.mix-mode .row-3-tile,
+.generator-grid.mix-mode .row-4-tile {
+    display: none;
+}
+
+/* Count badge on tiles */
+.generator-tile {
+    position: relative;
+}
+
+.tile-count-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    background: #ef4444;
+    color: white;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    z-index: 10;
+}
+
+/* Operation tile in mix mode */
+.operation-tile {
+    background: #1e293b !important;
+    border: 2px solid #3b82f6 !important;
+    cursor: pointer;
+    min-height: 80px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.operation-tile:hover {
+    background: #1e3a5f !important;
+    border-color: #60a5fa !important;
+}
+
+.operation-tile .op-label {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #60a5fa;
+    text-transform: uppercase;
+}
+
+.operation-tile .op-hint {
+    font-size: 0.65rem;
+    color: #64748b;
+    margin-top: 0.25rem;
+}
+
+/* Mix mode tile highlight */
+.generator-grid.mix-mode .generator-tile:not(.placeholder):not(.operation-tile) {
+    cursor: pointer;
+}
+
+.generator-grid.mix-mode .generator-tile:not(.placeholder):not(.operation-tile):hover {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+.generator-grid.mix-mode .generator-tile.in-mix {
+    background: linear-gradient(135deg, #1e3a5f, #1e293b);
+    border-color: #3b82f6;
+}
+
+.generator-grid.mix-mode .generator-tile.in-mix .generator-tile-name {
+    color: white;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     header {

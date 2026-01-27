@@ -55,7 +55,17 @@
     <main>
         <!-- Generator Selection Grid -->
         <section class="generator-grid-section">
-            <h3 class="section-title">Select Pattern</h3>
+            <div class="section-header">
+                <h3 class="section-title">Select Pattern</h3>
+                <div class="mode-toggle">
+                    <button class="mode-btn active" data-mode="single" id="mode-single-btn">Single Pattern</button>
+                    <button class="mode-btn" data-mode="mix" id="mode-mix-btn">Mix Patterns</button>
+                </div>
+            </div>
+            <div class="mix-info hidden" id="mix-info">
+                <span class="mix-recipe" id="mix-recipe">Click patterns to add...</span>
+                <button class="clear-mix-btn" id="clear-mix-btn">Clear</button>
+            </div>
             <div id="generator-grid" class="generator-grid">
                 <!-- Generator tiles will be dynamically inserted here -->
             </div>
