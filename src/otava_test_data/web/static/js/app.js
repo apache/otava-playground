@@ -491,41 +491,41 @@ function setupEventListeners() {
     clearMixBtn.addEventListener('click', clearMix);
 
     // Otava controls
-    runOtavaCheckbox.addEventListener('change', generateData);
-    windowLenInput.addEventListener('change', generateData);
-    maxPvalueInput.addEventListener('change', generateData);
+    runOtavaCheckbox.addEventListener('change', refreshDisplay);
+    windowLenInput.addEventListener('change', refreshDisplay);
+    maxPvalueInput.addEventListener('change', refreshDisplay);
 
     // Y-Axis Min slider with bounds
-    setupSliderWithBounds(yMinSlider, yMinInput, yMinBoundMin, yMinBoundMax, generateData);
+    setupSliderWithBounds(yMinSlider, yMinInput, yMinBoundMin, yMinBoundMax, refreshDisplay);
 
     // Y-Axis Max slider with bounds
-    setupSliderWithBounds(yMaxSlider, yMaxInput, yMaxBoundMin, yMaxBoundMax, generateData);
+    setupSliderWithBounds(yMaxSlider, yMaxInput, yMaxBoundMin, yMaxBoundMax, refreshDisplay);
 
     // Moving Average controls
-    runMaCheckbox.addEventListener('change', generateData);
-    maWindowInput.addEventListener('change', generateData);
-    maThresholdInput.addEventListener('change', generateData);
+    runMaCheckbox.addEventListener('change', refreshDisplay);
+    maWindowInput.addEventListener('change', refreshDisplay);
+    maThresholdInput.addEventListener('change', refreshDisplay);
 
     // Boundary controls
-    runBoundaryCheckbox.addEventListener('change', generateData);
-    boundaryUpperInput.addEventListener('change', generateData);
-    boundaryLowerInput.addEventListener('change', generateData);
+    runBoundaryCheckbox.addEventListener('change', refreshDisplay);
+    boundaryUpperInput.addEventListener('change', refreshDisplay);
+    boundaryLowerInput.addEventListener('change', refreshDisplay);
 
     // Threshold Alert controls
-    runThresholdCheckbox.addEventListener('change', generateData);
-    thresholdPercentInput.addEventListener('change', generateData);
-    thresholdOffsetInput.addEventListener('change', generateData);
+    runThresholdCheckbox.addEventListener('change', refreshDisplay);
+    thresholdPercentInput.addEventListener('change', refreshDisplay);
+    thresholdOffsetInput.addEventListener('change', refreshDisplay);
 
     // Sliding Window controls
-    runSlidingWindowCheckbox.addEventListener('change', generateData);
-    slidingWindowSizeInput.addEventListener('change', generateData);
-    slidingWindowOffsetInput.addEventListener('change', generateData);
-    slidingWindowThresholdInput.addEventListener('change', generateData);
+    runSlidingWindowCheckbox.addEventListener('change', refreshDisplay);
+    slidingWindowSizeInput.addEventListener('change', refreshDisplay);
+    slidingWindowOffsetInput.addEventListener('change', refreshDisplay);
+    slidingWindowThresholdInput.addEventListener('change', refreshDisplay);
 
     // Std Dev controls
-    runStdDevCheckbox.addEventListener('change', generateData);
-    stdDevWindowInput.addEventListener('change', generateData);
-    stdDevNumInput.addEventListener('change', generateData);
+    runStdDevCheckbox.addEventListener('change', refreshDisplay);
+    stdDevWindowInput.addEventListener('change', refreshDisplay);
+    stdDevNumInput.addEventListener('change', refreshDisplay);
 }
 
 // Update generator info display
@@ -1927,6 +1927,17 @@ async function showAllPatterns() {
 // ==========================================
 // Mix Mode Functions
 // ==========================================
+
+/**
+ * Refresh the current display - calls the appropriate update function based on mode
+ */
+function refreshDisplay() {
+    if (mixMode && mixComponents.length > 0) {
+        computeAndDisplayMixedData();
+    } else {
+        generateData();
+    }
+}
 
 /**
  * Toggle between Single Pattern and Mix Patterns mode
