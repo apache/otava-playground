@@ -55,7 +55,17 @@
     <main>
         <!-- Generator Selection Grid -->
         <section class="generator-grid-section">
-            <h3 class="section-title">Select Pattern</h3>
+            <div class="section-header">
+                <h3 class="section-title">Select Pattern</h3>
+                <div class="mode-toggle">
+                    <button class="mode-btn active" data-mode="single" id="mode-single-btn">Single Pattern</button>
+                    <button class="mode-btn" data-mode="mix" id="mode-mix-btn">Mix Patterns</button>
+                </div>
+            </div>
+            <div class="mix-info hidden" id="mix-info">
+                <span class="mix-recipe" id="mix-recipe">Click patterns to add...</span>
+                <button class="clear-mix-btn" id="clear-mix-btn">Clear</button>
+            </div>
             <div id="generator-grid" class="generator-grid">
                 <!-- Generator tiles will be dynamically inserted here -->
             </div>
@@ -114,9 +124,11 @@
                             <input type="number" id="window-len-input" value="30" min="5" max="100" step="5">
                         </div>
                         <div class="control-group">
-                            <label for="max-pvalue-input" class="param-label">Max P-Value</label>
                             <div class="input-with-help">
-                                <input type="number" id="max-pvalue-input" value="0.05" min="0.00001" max="1.0" step="0.001">
+                                <label for="max-pvalue-input" class="param-label">Max P-Value</label>
+                                <!-- These values usually tend to range along a logarithmic scale: 0.05, 0.01, 0.001 etc...
+                                    So we can't use type=number because it would require a thousand clicks to go from 0.1 to 0.0001 -->
+                                <input type="text" id="max-pvalue-input" value="0.001">
                                 <button type="button" class="param-help-btn" data-tooltip="Significance threshold for detecting changes. Lower values mean stricter detection (fewer false positives but may miss subtle changes). 0.05 is standard; use 0.00001 for very high confidence.">?</button>
                             </div>
                         </div>
@@ -220,6 +232,46 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Sliding Window Controls -->
+                <div class="controls sliding-window-controls">
+                    <div class="panel-header">
+                        <label for="run-sliding-window-checkbox" class="panel-title">Sliding Window</label>
+                        <input type="checkbox" id="run-sliding-window-checkbox">
+                    </div>
+                    <div class="panel-fields">
+                        <div class="control-group">
+                            <label for="sliding-window-size-input">Window Size (N)</label>
+                            <input type="number" id="sliding-window-size-input" value="10" min="3" max="50" step="1">
+                        </div>
+                        <div class="control-group">
+                            <label for="sliding-window-offset-input">Offset (M)</label>
+                            <input type="number" id="sliding-window-offset-input" value="20" min="5" max="100" step="1">
+                        </div>
+                        <div class="control-group">
+                            <label for="sliding-window-threshold-input">Threshold (%)</label>
+                            <input type="number" id="sliding-window-threshold-input" value="5" min="0.1" max="100" step="0.5">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Std Dev Controls -->
+                <div class="controls stddev-controls">
+                    <div class="panel-header">
+                        <label for="run-stddev-checkbox" class="panel-title">Std Dev</label>
+                        <input type="checkbox" id="run-stddev-checkbox">
+                    </div>
+                    <div class="panel-fields">
+                        <div class="control-group">
+                            <label for="stddev-window-input">Window (M)</label>
+                            <input type="number" id="stddev-window-input" value="20" min="5" max="100" step="1">
+                        </div>
+                        <div class="control-group">
+                            <label for="stddev-num-input">Std Devs (K)</label>
+                            <input type="number" id="stddev-num-input" value="2" min="0.5" max="5" step="0.1">
+                        </div>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -261,7 +313,11 @@
             </div>
             <div class="legend-item">
                 <span class="legend-marker true-positive"></span>
-                <span>Detected (TP)</span>
+                <span>Exact Match (TP)</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-marker close-match"></span>
+                <span>Close Match (CM)</span>
             </div>
             <div class="legend-item">
                 <span class="legend-marker false-positive"></span>
@@ -276,70 +332,24 @@
 
         <!-- Accuracy Metrics -->
         <section class="accuracy-metrics" id="accuracy-metrics">
-            <div class="metrics-header">
-                <h3>Detection Accuracy</h3>
-                <button id="metrics-help-btn" class="metrics-help-btn" title="Learn about detection metrics">?</button>
-            </div>
-
-            <!-- Metrics Tutorial Panel -->
-            <div id="metrics-tutorial-panel" class="metrics-tutorial-panel hidden">
-                <div class="metrics-tutorial-content">
-                    <div class="metrics-tutorial-section">
-                        <h4>Ground Truth</h4>
-                        <p id="metrics-ground-truth">The actual, known change points in the data. Shown as <span class="highlight-green">green dashed lines</span> on the chart.</p>
-                    </div>
-                    <div class="metrics-tutorial-section">
-                        <h4>True Positive (TP)</h4>
-                        <p>A correctly detected change point - the detector found a real change. Shown as <span class="highlight-blue">colored markers</span> matching ground truth.</p>
-                    </div>
-                    <div class="metrics-tutorial-section">
-                        <h4>False Positive (FP)</h4>
-                        <p>A false alarm - the detector reported a change where none exists. Shown as <span class="highlight-red">red/orange/pink markers</span>.</p>
-                    </div>
-                    <div class="metrics-tutorial-section">
-                        <h4>False Negative (FN)</h4>
-                        <p>A missed change - a real change point the detector failed to find. Ground truth lines without matching detection markers.</p>
-                    </div>
-                    <div class="metrics-tutorial-section metrics-formulas">
-                        <h4>How Metrics Are Calculated</h4>
-                        <ul>
-                            <li><strong>Precision</strong> = TP / (TP + FP) - Of detections made, how many were correct?</li>
-                            <li><strong>Recall</strong> = TP / (TP + FN) - Of real changes, how many were found?</li>
-                            <li><strong>F1 Score</strong> = Harmonic mean of Precision and Recall</li>
-                        </ul>
-                    </div>
-                    <div class="metrics-tutorial-section metrics-matching">
-                        <h4>How Matching Works</h4>
-                        <p>A detection is matched to ground truth if it's within <strong>5 indices</strong> (tolerance). This allows for slight positional inaccuracy from windowing algorithms. We know the ground truth because <em>we generate synthetic data</em> - the change points are programmed in. In real-world scenarios, ground truth comes from deployment logs, incident reports, or manual labeling.</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="metrics-grid">
-                <div class="metric-card precision">
-                    <h4>Precision</h4>
-                    <span id="metric-precision">-</span>
-                    <p class="metric-desc">Correct / All Detected</p>
-                </div>
-                <div class="metric-card recall">
-                    <h4>Recall</h4>
-                    <span id="metric-recall">-</span>
-                    <p class="metric-desc">Detected / All True</p>
-                </div>
-                <div class="metric-card f1">
-                    <h4>F1 Score</h4>
-                    <span id="metric-f1">-</span>
-                    <p class="metric-desc">Harmonic Mean</p>
-                </div>
-                <div class="metric-card counts">
-                    <h4>Counts</h4>
-                    <div class="count-details">
-                        <span>TP: <strong id="metric-tp">-</strong></span>
-                        <span>FP: <strong id="metric-fp">-</strong></span>
-                        <span>FN: <strong id="metric-fn">-</strong></span>
-                    </div>
-                </div>
-            </div>
+            <h3>Detection Accuracy</h3>
+            <table class="accuracy-table">
+                <thead>
+                    <tr>
+                        <th>Method</th>
+                        <th>TP</th>
+                        <th>CM</th>
+                        <th>FP</th>
+                        <th>FN</th>
+                        <th>Precision</th>
+                        <th>Recall</th>
+                        <th>F1</th>
+                    </tr>
+                </thead>
+                <tbody id="accuracy-table-body">
+                    <!-- Rows will be dynamically inserted -->
+                </tbody>
+            </table>
         </section>
 
         <!-- Basic Stats -->

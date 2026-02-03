@@ -12,6 +12,14 @@ let generatorTileCharts = {};  // Mini charts for generator tiles
 let analysisMethods = {};  // Tutorial content for analysis methods
 let tutorialVisible = false;  // Track tutorial panel visibility
 
+// Mix Mode State
+let mixMode = false;              // Single Pattern vs Mix Patterns mode
+let mixOperation = 'sum';         // 'sum' or 'append'
+let mixComponents = [];           // [{name, data, changePoints, params, count}]
+let mixedData = null;             // Combined data array
+let mixedChangePoints = [];       // Merged ground truth change points
+let tileBadges = {};              // Track count badges on tiles
+
 // DOM Elements - Data Generation
 const generatorGrid = document.getElementById('generator-grid');
 const lengthSlider = document.getElementById('length-slider');
@@ -20,6 +28,13 @@ const lengthMin = document.getElementById('length-min');
 const lengthMax = document.getElementById('length-max');
 const seedInput = document.getElementById('seed-input');
 const dynamicParams = document.getElementById('dynamic-params');
+
+// DOM Elements - Mix Mode
+const modeSingleBtn = document.getElementById('mode-single-btn');
+const modeMixBtn = document.getElementById('mode-mix-btn');
+const mixInfo = document.getElementById('mix-info');
+const mixRecipe = document.getElementById('mix-recipe');
+const clearMixBtn = document.getElementById('clear-mix-btn');
 
 // DOM Elements - Otava Controls
 const runOtavaCheckbox = document.getElementById('run-otava-checkbox');
@@ -49,8 +64,20 @@ const runThresholdCheckbox = document.getElementById('run-threshold-checkbox');
 const thresholdPercentInput = document.getElementById('threshold-percent-input');
 const thresholdOffsetInput = document.getElementById('threshold-offset-input');
 
+// DOM Elements - Sliding Window Controls
+const runSlidingWindowCheckbox = document.getElementById('run-sliding-window-checkbox');
+const slidingWindowSizeInput = document.getElementById('sliding-window-size-input');
+const slidingWindowOffsetInput = document.getElementById('sliding-window-offset-input');
+const slidingWindowThresholdInput = document.getElementById('sliding-window-threshold-input');
+
+// DOM Elements - Std Dev Controls
+const runStdDevCheckbox = document.getElementById('run-stddev-checkbox');
+const stdDevWindowInput = document.getElementById('stddev-window-input');
+const stdDevNumInput = document.getElementById('stddev-num-input');
+
 // Default match tolerance for comparing detected vs ground truth change points
-const DEFAULT_TOLERANCE = 0;
+const DEFAULT_TOLERANCE = 0;  // Exact match for True Positive
+const CLOSE_MATCH_TOLERANCE = 5;  // Within 5 points for Close Match
 
 // DOM Elements - Actions
 const generateBtn = document.getElementById('generate-btn');
@@ -72,12 +99,7 @@ const statCpDetected = document.getElementById('stat-cp-detected');
 
 // DOM Elements - Accuracy Metrics
 const accuracyMetrics = document.getElementById('accuracy-metrics');
-const metricPrecision = document.getElementById('metric-precision');
-const metricRecall = document.getElementById('metric-recall');
-const metricF1 = document.getElementById('metric-f1');
-const metricTp = document.getElementById('metric-tp');
-const metricFp = document.getElementById('metric-fp');
-const metricFn = document.getElementById('metric-fn');
+const accuracyTableBody = document.getElementById('accuracy-table-body');
 
 // DOM Elements - Tables
 const cpDetail = document.getElementById('change-points-detail');
@@ -192,124 +214,174 @@ async function populateGeneratorGrid() {
     const previewData = {};
     previews.forEach(p => { previewData[p.name] = p.data; });
 
-    // Custom ordering with four rows:
-    // Row 1: Clean single patterns
-    // Row 2: Clean multiple patterns (with placeholder for Constant)
-    // Row 3: Normal noise single patterns
-    // Row 4: Uniform noise single patterns
     const generatorNames = Object.keys(generators);
-    const orderedNames = [];
 
-    // Row 1 - single clean patterns
-    const row1Order = [
-        'constant',
-        'outlier_clean',
-        'step_function_clean',
-        'regression_fix_clean',
-        'variance_change_clean',
-        'phase_change_clean',
-        'banding_clean'
-    ];
-    const row1Names = row1Order.filter(name => generatorNames.includes(name));
-    orderedNames.push(...row1Names);
+    if (mixMode) {
+        // Mix mode layout: Single row with clean patterns + noise + operation toggle
+        const mixRow1Order = [
+            'constant',
+            'noise_normal',
+            'noise_uniform',
+            'outlier_clean',
+            'step_function_clean',
+            'regression_fix_clean',
+            'variance_change_clean',
+            'phase_change_clean',
+            'banding_clean'
+        ];
+        const mixRow1Names = mixRow1Order.filter(name => generatorNames.includes(name));
 
-    // Row 2 - multiple clean patterns (with placeholder)
-    const row2Order = [
-        '__placeholder__',
-        'multiple_outliers_clean',
-        'multiple_changes_clean',
-        'multiple_regression_fix_clean',
-        'multiple_variance_changes_clean',
-        'multiple_phase_changes_clean',
-        'multiple_banding_clean'
-    ];
-    const row2Names = row2Order.filter(name =>
-        name === '__placeholder__' || generatorNames.includes(name)
-    );
-    orderedNames.push(...row2Names);
-
-    // Row 3 - normal noise single patterns
-    const row3Order = [
-        'noise_normal',
-        'outlier',
-        'step_function',
-        'regression_fix',
-        'variance_change',
-        'phase_change',
-        'banding'
-    ];
-    const row3Names = row3Order.filter(name => generatorNames.includes(name));
-    orderedNames.push(...row3Names);
-
-    // Row 4 - uniform noise single patterns
-    const row4Order = [
-        'noise_uniform',
-        'outlier_uniform',
-        'step_function_uniform',
-        'regression_fix_uniform',
-        'variance_change_uniform',
-        'phase_change_uniform',
-        'banding_uniform'
-    ];
-    const row4Names = row4Order.filter(name => generatorNames.includes(name));
-    orderedNames.push(...row4Names);
-
-    // Track line break positions
-    const row1EndIndex = row1Names.length;
-    const row2EndIndex = row1Names.length + row2Names.length;
-    const row3EndIndex = row1Names.length + row2Names.length + row3Names.length;
-    const row4EndIndex = row1Names.length + row2Names.length + row3Names.length + row4Names.length;
-
-    // Create tiles for each generator in order
-    let tileIndex = 0;
-    for (const name of orderedNames) {
-        tileIndex++;
-
-        // Handle placeholder tile (empty space for alignment)
-        if (name === '__placeholder__') {
-            const placeholder = document.createElement('div');
-            placeholder.className = 'generator-tile placeholder';
-            generatorGrid.appendChild(placeholder);
-            continue;
+        // Create pattern tiles
+        for (const name of mixRow1Names) {
+            const info = generators[name];
+            const tile = createGeneratorTile(name, info, previewData[name], true);
+            generatorGrid.appendChild(tile);
         }
 
-        const info = generators[name];
-        const tile = document.createElement('div');
-        tile.className = 'generator-tile' + (name === selectedGenerator ? ' selected' : '');
-        tile.dataset.generator = name;
+        // Operation toggle tile at the end
+        const opTile = document.createElement('div');
+        opTile.className = 'generator-tile operation-tile';
+        opTile.innerHTML = `
+            <div class="op-label">${mixOperation.toUpperCase()}</div>
+            <div class="op-hint">Click to toggle</div>
+        `;
+        opTile.addEventListener('click', toggleMixOperation);
+        generatorGrid.appendChild(opTile);
 
-        // Preview container
-        const preview = document.createElement('div');
-        preview.className = 'generator-tile-preview';
-        const canvas = document.createElement('canvas');
-        canvas.id = `preview-${name}`;
-        preview.appendChild(canvas);
+        // Update badges for existing mix components
+        updateTileBadges();
 
-        // Name label
-        const label = document.createElement('div');
-        label.className = 'generator-tile-name';
-        label.textContent = info.name;
+    } else {
+        // Single mode layout: Original 4 rows
+        const orderedNames = [];
 
-        tile.appendChild(preview);
-        tile.appendChild(label);
-        generatorGrid.appendChild(tile);
+        // Row 1 - single clean patterns
+        const row1Order = [
+            'constant',
+            'outlier_clean',
+            'step_function_clean',
+            'regression_fix_clean',
+            'variance_change_clean',
+            'phase_change_clean',
+            'banding_clean'
+        ];
+        const row1Names = row1Order.filter(name => generatorNames.includes(name));
+        orderedNames.push(...row1Names);
 
-        // Add line breaks after each row
-        if (tileIndex === row1EndIndex || tileIndex === row2EndIndex ||
-            tileIndex === row3EndIndex || tileIndex === row4EndIndex) {
-            const lineBreak = document.createElement('div');
-            lineBreak.className = 'generator-grid-break';
-            generatorGrid.appendChild(lineBreak);
-        }
+        // Row 2 - multiple clean patterns (with placeholder)
+        const row2Order = [
+            '__placeholder__',
+            'multiple_outliers_clean',
+            'multiple_changes_clean',
+            'multiple_regression_fix_clean',
+            'multiple_variance_changes_clean',
+            'multiple_phase_changes_clean',
+            'multiple_banding_clean'
+        ];
+        const row2Names = row2Order.filter(name =>
+            name === '__placeholder__' || generatorNames.includes(name)
+        );
+        orderedNames.push(...row2Names);
 
-        // Click handler
-        tile.addEventListener('click', () => selectGenerator(name));
+        // Row 3 - normal noise single patterns
+        const row3Order = [
+            'noise_normal',
+            'outlier',
+            'step_function',
+            'regression_fix',
+            'variance_change',
+            'phase_change',
+            'banding'
+        ];
+        const row3Names = row3Order.filter(name => generatorNames.includes(name));
+        orderedNames.push(...row3Names);
 
-        // Create mini chart
-        if (previewData[name] && previewData[name].data) {
-            createTileChart(canvas, previewData[name].data, name === selectedGenerator);
+        // Row 4 - uniform noise single patterns
+        const row4Order = [
+            'noise_uniform',
+            'outlier_uniform',
+            'step_function_uniform',
+            'regression_fix_uniform',
+            'variance_change_uniform',
+            'phase_change_uniform',
+            'banding_uniform'
+        ];
+        const row4Names = row4Order.filter(name => generatorNames.includes(name));
+        orderedNames.push(...row4Names);
+
+        // Track line break positions
+        const row1EndIndex = row1Names.length;
+        const row2EndIndex = row1Names.length + row2Names.length;
+        const row3EndIndex = row1Names.length + row2Names.length + row3Names.length;
+        const row4EndIndex = row1Names.length + row2Names.length + row3Names.length + row4Names.length;
+
+        // Create tiles for each generator in order
+        let tileIndex = 0;
+        for (const name of orderedNames) {
+            tileIndex++;
+
+            // Handle placeholder tile (empty space for alignment)
+            if (name === '__placeholder__') {
+                const placeholder = document.createElement('div');
+                placeholder.className = 'generator-tile placeholder';
+                generatorGrid.appendChild(placeholder);
+                continue;
+            }
+
+            const info = generators[name];
+            const tile = createGeneratorTile(name, info, previewData[name], false);
+            generatorGrid.appendChild(tile);
+
+            // Add line breaks after each row
+            if (tileIndex === row1EndIndex || tileIndex === row2EndIndex ||
+                tileIndex === row3EndIndex || tileIndex === row4EndIndex) {
+                const lineBreak = document.createElement('div');
+                lineBreak.className = 'generator-grid-break';
+                generatorGrid.appendChild(lineBreak);
+            }
         }
     }
+
+    // Apply mix mode class to grid
+    generatorGrid.classList.toggle('mix-mode', mixMode);
+}
+
+/**
+ * Create a generator tile element
+ */
+function createGeneratorTile(name, info, preview, isMixMode) {
+    const tile = document.createElement('div');
+    tile.className = 'generator-tile' + (!isMixMode && name === selectedGenerator ? ' selected' : '');
+    tile.dataset.generator = name;
+
+    // Preview container
+    const previewDiv = document.createElement('div');
+    previewDiv.className = 'generator-tile-preview';
+    const canvas = document.createElement('canvas');
+    canvas.id = `preview-${name}`;
+    previewDiv.appendChild(canvas);
+
+    // Name label
+    const label = document.createElement('div');
+    label.className = 'generator-tile-name';
+    label.textContent = info.name;
+
+    tile.appendChild(previewDiv);
+    tile.appendChild(label);
+
+    // Click handler - different for mix mode vs single mode
+    if (isMixMode) {
+        tile.addEventListener('click', () => addToMix(name));
+    } else {
+        tile.addEventListener('click', () => selectGenerator(name));
+    }
+
+    // Create mini chart
+    if (preview && preview.data) {
+        createTileChart(canvas, preview.data, !isMixMode && name === selectedGenerator);
+    }
+
+    return tile;
 }
 
 // Create a mini chart for a generator tile
@@ -623,35 +695,66 @@ function setupEventListeners() {
     generateBtn.addEventListener('click', generateData);
     showAllBtn.addEventListener('click', showAllPatterns);
 
+    // Mix mode controls
+    modeSingleBtn.addEventListener('click', () => toggleMixMode(false));
+    modeMixBtn.addEventListener('click', () => toggleMixMode(true));
+    clearMixBtn.addEventListener('click', clearMix);
+
     // Otava controls
-    runOtavaCheckbox.addEventListener('change', generateData);
-    windowLenInput.addEventListener('change', generateData);
-    maxPvalueInput.addEventListener('change', generateData);
+    runOtavaCheckbox.addEventListener('change', refreshDisplay);
+    windowLenInput.addEventListener('change', refreshDisplay);
+    maxPvalueInput.addEventListener('change', refreshDisplay);
 
     // Y-Axis Min slider with bounds
-    setupSliderWithBounds(yMinSlider, yMinInput, yMinBoundMin, yMinBoundMax, generateData);
+    setupSliderWithBounds(yMinSlider, yMinInput, yMinBoundMin, yMinBoundMax, refreshDisplay);
 
     // Y-Axis Max slider with bounds
-    setupSliderWithBounds(yMaxSlider, yMaxInput, yMaxBoundMin, yMaxBoundMax, generateData);
+    setupSliderWithBounds(yMaxSlider, yMaxInput, yMaxBoundMin, yMaxBoundMax, refreshDisplay);
 
     // Moving Average controls
-    runMaCheckbox.addEventListener('change', generateData);
-    maWindowInput.addEventListener('change', generateData);
-    maThresholdInput.addEventListener('change', generateData);
+    runMaCheckbox.addEventListener('change', refreshDisplay);
+    maWindowInput.addEventListener('change', refreshDisplay);
+    maThresholdInput.addEventListener('change', refreshDisplay);
 
     // Boundary controls
-    runBoundaryCheckbox.addEventListener('change', generateData);
-    boundaryUpperInput.addEventListener('change', generateData);
-    boundaryLowerInput.addEventListener('change', generateData);
+    runBoundaryCheckbox.addEventListener('change', refreshDisplay);
+    boundaryUpperInput.addEventListener('change', refreshDisplay);
+    boundaryLowerInput.addEventListener('change', refreshDisplay);
 
     // Threshold Alert controls
-    runThresholdCheckbox.addEventListener('change', generateData);
-    thresholdPercentInput.addEventListener('change', generateData);
-    thresholdOffsetInput.addEventListener('change', generateData);
+    runThresholdCheckbox.addEventListener('change', refreshDisplay);
+    thresholdPercentInput.addEventListener('change', refreshDisplay);
+    thresholdOffsetInput.addEventListener('change', refreshDisplay);
+
+    // Sliding Window controls
+    runSlidingWindowCheckbox.addEventListener('change', refreshDisplay);
+    slidingWindowSizeInput.addEventListener('change', refreshDisplay);
+    slidingWindowOffsetInput.addEventListener('change', refreshDisplay);
+    slidingWindowThresholdInput.addEventListener('change', refreshDisplay);
+
+    // Std Dev controls
+    runStdDevCheckbox.addEventListener('change', refreshDisplay);
+    stdDevWindowInput.addEventListener('change', refreshDisplay);
+    stdDevNumInput.addEventListener('change', refreshDisplay);
 }
 
 // Update generator info display
 function updateGeneratorInfo() {
+    if (mixMode && mixComponents.length > 0) {
+        // Mix mode with components
+        const totalCPs = mixedChangePoints ? mixedChangePoints.filter(cp => cp.type !== 'outlier').length : 0;
+        generatorTitle.textContent = 'Mixed Pattern';
+        const opText = mixOperation === 'sum' ? 'Sum' : 'Append';
+        generatorDescription.textContent = `${mixComponents.length} component(s) combined using ${opText} operation`;
+
+        if (totalCPs > 0) {
+            changePointInfo.classList.remove('hidden');
+        } else {
+            changePointInfo.classList.add('hidden');
+        }
+        return;
+    }
+
     const name = selectedGenerator;
     const info = generators[name];
 
@@ -859,6 +962,108 @@ function detectChangePointsThreshold(data, threshold, offset = 1) {
 }
 
 /**
+ * Sliding Window Change Point Detection
+ * Compares average of current window with average of reference window (offset back by M points)
+ * Detects change when percentage difference exceeds threshold
+ * @param {number[]} data - The time series data
+ * @param {number} windowSize - Number of points in each window (N)
+ * @param {number} offset - How far back the reference window is (M)
+ * @param {number} threshold - Percentage threshold for detection
+ */
+function detectChangePointsSlidingWindow(data, windowSize, offset, threshold) {
+    const indices = [];
+    const details = [];
+    const halfWindow = Math.floor(windowSize / 2);
+
+    // Need enough points for both windows
+    const startIdx = halfWindow + offset + halfWindow;
+
+    for (let i = startIdx; i < data.length - halfWindow; i++) {
+        // Current window: centered around point i
+        const currentStart = i - halfWindow;
+        const currentEnd = i + halfWindow + 1;
+        const currentWindow = data.slice(currentStart, currentEnd);
+        const currentAvg = currentWindow.reduce((a, b) => a + b, 0) / currentWindow.length;
+
+        // Reference window: centered around point (i - offset)
+        const refCenter = i - offset;
+        const refStart = refCenter - halfWindow;
+        const refEnd = refCenter + halfWindow + 1;
+        const refWindow = data.slice(refStart, refEnd);
+        const refAvg = refWindow.reduce((a, b) => a + b, 0) / refWindow.length;
+
+        // Avoid division by zero
+        if (refAvg === 0) continue;
+
+        // Calculate percentage change
+        const percentChange = ((currentAvg - refAvg) / Math.abs(refAvg)) * 100;
+        const absPercentChange = Math.abs(percentChange);
+
+        if (absPercentChange > threshold) {
+            // Avoid duplicate detections within window size
+            if (indices.length === 0 || i - indices[indices.length - 1] >= windowSize) {
+                indices.push(i);
+                details.push({
+                    index: i,
+                    currentAvg: currentAvg.toFixed(2),
+                    refAvg: refAvg.toFixed(2),
+                    percentChange: percentChange.toFixed(2),
+                    direction: percentChange > 0 ? 'increase' : 'decrease'
+                });
+            }
+        }
+    }
+
+    return { indices, details };
+}
+
+/**
+ * Standard Deviation Based Change Point Detection
+ * For each point P, compare it to mean ± K standard deviations of M previous points
+ * If P is outside this range, trigger an alert
+ * @param {number[]} data - The time series data
+ * @param {number} windowSize - Number of previous points to use (M)
+ * @param {number} numStdDevs - Number of standard deviations (K)
+ */
+function detectChangePointsStdDev(data, windowSize, numStdDevs) {
+    const indices = [];
+    const details = [];
+
+    // Need at least windowSize points before we can start
+    for (let i = windowSize; i < data.length; i++) {
+        // Get the M previous points (not including current point)
+        const window = data.slice(i - windowSize, i);
+
+        // Compute mean and standard deviation
+        const mean = window.reduce((a, b) => a + b, 0) / windowSize;
+        const variance = window.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / windowSize;
+        const stdDev = Math.sqrt(variance);
+
+        // Current point
+        const value = data[i];
+
+        // Check if outside mean ± K std devs
+        const upperBound = mean + numStdDevs * stdDev;
+        const lowerBound = mean - numStdDevs * stdDev;
+        const zScore = stdDev > 0 ? (value - mean) / stdDev : 0;
+
+        if (value > upperBound || value < lowerBound) {
+            indices.push(i);
+            details.push({
+                index: i,
+                value: value.toFixed(2),
+                mean: mean.toFixed(2),
+                stdDev: stdDev.toFixed(2),
+                zScore: zScore.toFixed(2),
+                direction: value > upperBound ? 'above' : 'below'
+            });
+        }
+    }
+
+    return { indices, details };
+}
+
+/**
  * Boundary/Threshold Change Point Detection
  * Detects change points when values cross upper or lower boundaries
  * Only triggers once per boundary crossing (not for every point outside bounds)
@@ -958,6 +1163,47 @@ async function generateData() {
     }
 }
 
+/**
+ * Classify detected indices into exact matches, close matches, and false positives
+ * @param {number[]} detectedIndices - Array of detected change point indices
+ * @param {number[]} groundTruthIndices - Array of ground truth change point indices
+ * @returns {Object} Object with exactMatches, closeMatches sets and counts
+ */
+function classifyDetections(detectedIndices, groundTruthIndices) {
+    const exactMatches = new Set();
+    const closeMatches = new Set();
+    const usedGroundTruth = new Set();
+
+    // First pass: find exact matches
+    detectedIndices.forEach(dIdx => {
+        for (const gtIdx of groundTruthIndices) {
+            if (!usedGroundTruth.has(gtIdx) && Math.abs(dIdx - gtIdx) <= DEFAULT_TOLERANCE) {
+                exactMatches.add(dIdx);
+                usedGroundTruth.add(gtIdx);
+                break;
+            }
+        }
+    });
+
+    // Second pass: find close matches (not already exact)
+    detectedIndices.forEach(dIdx => {
+        if (exactMatches.has(dIdx)) return;
+        for (const gtIdx of groundTruthIndices) {
+            if (!usedGroundTruth.has(gtIdx) && Math.abs(dIdx - gtIdx) <= CLOSE_MATCH_TOLERANCE) {
+                closeMatches.add(dIdx);
+                usedGroundTruth.add(gtIdx);
+                break;
+            }
+        }
+    });
+
+    const tp = exactMatches.size;
+    const cm = closeMatches.size;
+    const fp = detectedIndices.length - tp - cm;
+
+    return { exactMatches, closeMatches, tp, cm, fp };
+}
+
 // Update the stacked charts - one per enabled analysis method
 function updateChart(data) {
     // Destroy existing charts
@@ -985,20 +1231,11 @@ function updateChart(data) {
     const maResult = runMa ? detectChangePointsMA(values, maWindow, maThreshold) : { indices: [], details: [] };
     const maDetectedIndices = maResult.indices;
 
-    // Determine matched pairs for Otava coloring
-    const matchedPairs = data.accuracy?.matched_pairs || [];
-    const matchedDetected = new Set(matchedPairs.map(p => p.detected));
+    // Classify Otava detections
+    const otavaClassification = classifyDetections(detectedIndices, groundTruthIndices);
 
-    // Determine matched pairs for MA coloring
-    const maMatchedIndices = new Set();
-    maDetectedIndices.forEach(maIdx => {
-        for (const gtIdx of groundTruthIndices) {
-            if (Math.abs(maIdx - gtIdx) <= DEFAULT_TOLERANCE) {
-                maMatchedIndices.add(maIdx);
-                break;
-            }
-        }
-    });
+    // Classify MA detections
+    const maClassification = classifyDetections(maDetectedIndices, groundTruthIndices);
 
     // Run Boundary detection if enabled
     const runBoundary = runBoundaryCheckbox.checked;
@@ -1007,16 +1244,8 @@ function updateChart(data) {
     const boundaryResult = runBoundary ? detectChangePointsBoundary(values, upperBound, lowerBound) : { indices: [], details: [] };
     const boundaryDetectedIndices = boundaryResult.indices;
 
-    // Determine matched pairs for Boundary coloring
-    const boundaryMatchedIndices = new Set();
-    boundaryDetectedIndices.forEach(bIdx => {
-        for (const gtIdx of groundTruthIndices) {
-            if (Math.abs(bIdx - gtIdx) <= DEFAULT_TOLERANCE) {
-                boundaryMatchedIndices.add(bIdx);
-                break;
-            }
-        }
-    });
+    // Classify Boundary detections
+    const boundaryClassification = classifyDetections(boundaryDetectedIndices, groundTruthIndices);
 
     // Run Threshold Alert detection if enabled
     const runThreshold = runThresholdCheckbox.checked;
@@ -1025,16 +1254,29 @@ function updateChart(data) {
     const thresholdResult = runThreshold ? detectChangePointsThreshold(values, thresholdPercent, thresholdOffset) : { indices: [], details: [] };
     const thresholdDetectedIndices = thresholdResult.indices;
 
-    // Determine matched pairs for Threshold Alert coloring
-    const thresholdMatchedIndices = new Set();
-    thresholdDetectedIndices.forEach(tIdx => {
-        for (const gtIdx of groundTruthIndices) {
-            if (Math.abs(tIdx - gtIdx) <= DEFAULT_TOLERANCE) {
-                thresholdMatchedIndices.add(tIdx);
-                break;
-            }
-        }
-    });
+    // Classify Threshold detections
+    const thresholdClassification = classifyDetections(thresholdDetectedIndices, groundTruthIndices);
+
+    // Run Sliding Window detection if enabled
+    const runSlidingWindow = runSlidingWindowCheckbox.checked;
+    const slidingWindowSize = parseInt(slidingWindowSizeInput.value);
+    const slidingWindowOffset = parseInt(slidingWindowOffsetInput.value);
+    const slidingWindowThreshold = parseFloat(slidingWindowThresholdInput.value);
+    const slidingWindowResult = runSlidingWindow ? detectChangePointsSlidingWindow(values, slidingWindowSize, slidingWindowOffset, slidingWindowThreshold) : { indices: [], details: [] };
+    const slidingWindowDetectedIndices = slidingWindowResult.indices;
+
+    // Classify Sliding Window detections
+    const slidingWindowClassification = classifyDetections(slidingWindowDetectedIndices, groundTruthIndices);
+
+    // Run Std Dev detection if enabled
+    const runStdDev = runStdDevCheckbox.checked;
+    const stdDevWindow = parseInt(stdDevWindowInput.value);
+    const stdDevNum = parseFloat(stdDevNumInput.value);
+    const stdDevResult = runStdDev ? detectChangePointsStdDev(values, stdDevWindow, stdDevNum) : { indices: [], details: [] };
+    const stdDevDetectedIndices = stdDevResult.indices;
+
+    // Classify Std Dev detections
+    const stdDevClassification = classifyDetections(stdDevDetectedIndices, groundTruthIndices);
 
     // Create ground truth annotations (shared by all charts)
     const createAnnotations = () => {
@@ -1063,7 +1305,7 @@ function updateChart(data) {
     };
 
     // Helper to create a chart container
-    const createChartContainer = (id, title, color, tpCount, fpCount) => {
+    const createChartContainer = (id, title, color, tpCount, cmCount, fpCount) => {
         const container = document.createElement('div');
         container.className = 'stacked-chart';
         container.id = `chart-${id}`;
@@ -1075,6 +1317,7 @@ function updateChart(data) {
             <h4>${title}</h4>
             <span class="detection-count">
                 <strong style="color: #ef4444">${tpCount} TP</strong> /
+                <strong style="color: #eab308">${cmCount} CM</strong> /
                 <strong style="color: #f97316">${fpCount} FP</strong>
             </span>
         `;
@@ -1119,30 +1362,37 @@ function updateChart(data) {
     if (runMa) enabledMethods.push('ma');
     if (runBoundary) enabledMethods.push('boundary');
     if (runThreshold) enabledMethods.push('threshold');
+    if (runSlidingWindow) enabledMethods.push('slidingWindow');
+    if (runStdDev) enabledMethods.push('stdDev');
 
     // Create Otava chart if enabled
     if (runOtavaCheckbox.checked) {
-        const otavaTp = matchedDetected.size;
-        const otavaFp = detectedIndices.length - otavaTp;
-        const canvas = createChartContainer('otava', 'Otava Analysis', '#2563eb', otavaTp, otavaFp);
+        const { tp: otavaTp, cm: otavaCm, fp: otavaFp, exactMatches: otavaExact, closeMatches: otavaClose } = otavaClassification;
+        const canvas = createChartContainer('otava', 'Otava Analysis', '#2563eb', otavaTp, otavaCm, otavaFp);
         const ctx = canvas.getContext('2d');
 
         const otavaPointColors = values.map((_, i) => {
             if (detectedIndices.includes(i)) {
-                return matchedDetected.has(i) ? '#f87171' : '#f97316';
+                if (otavaExact.has(i)) return '#f87171';  // TP - red
+                if (otavaClose.has(i)) return '#fde047';  // CM - yellow
+                return '#f97316';  // FP - orange
             }
             return 'transparent';
         });
         const otavaPointBorders = values.map((_, i) => {
             if (detectedIndices.includes(i)) {
-                return matchedDetected.has(i) ? '#ef4444' : '#ea580c';
+                if (otavaExact.has(i)) return '#ef4444';
+                if (otavaClose.has(i)) return '#eab308';
+                return '#ea580c';
             }
             return 'transparent';
         });
         const otavaPointRadii = values.map((_, i) => detectedIndices.includes(i) ? 6 : 0);
         const otavaPointStyles = values.map((_, i) => {
             if (detectedIndices.includes(i)) {
-                return matchedDetected.has(i) ? 'circle' : 'triangle';
+                if (otavaExact.has(i)) return 'circle';  // TP
+                if (otavaClose.has(i)) return 'rectRot';  // CM - diamond
+                return 'triangle';  // FP
             }
             return 'circle';
         });
@@ -1175,27 +1425,32 @@ function updateChart(data) {
 
     // Create MA chart if enabled
     if (runMa) {
-        const maTp = maMatchedIndices.size;
-        const maFp = maDetectedIndices.length - maTp;
-        const canvas = createChartContainer('ma', 'Moving Average Analysis', '#8b5cf6', maTp, maFp);
+        const { tp: maTp, cm: maCm, fp: maFp, exactMatches: maExact, closeMatches: maClose } = maClassification;
+        const canvas = createChartContainer('ma', 'Moving Average Analysis', '#8b5cf6', maTp, maCm, maFp);
         const ctx = canvas.getContext('2d');
 
         const maPointColors = values.map((_, i) => {
             if (maDetectedIndices.includes(i)) {
-                return maMatchedIndices.has(i) ? '#f87171' : '#f97316';
+                if (maExact.has(i)) return '#f87171';
+                if (maClose.has(i)) return '#fde047';
+                return '#f97316';
             }
             return 'transparent';
         });
         const maPointBorders = values.map((_, i) => {
             if (maDetectedIndices.includes(i)) {
-                return maMatchedIndices.has(i) ? '#ef4444' : '#ea580c';
+                if (maExact.has(i)) return '#ef4444';
+                if (maClose.has(i)) return '#eab308';
+                return '#ea580c';
             }
             return 'transparent';
         });
         const maPointRadii = values.map((_, i) => maDetectedIndices.includes(i) ? 6 : 0);
         const maPointStyles = values.map((_, i) => {
             if (maDetectedIndices.includes(i)) {
-                return maMatchedIndices.has(i) ? 'circle' : 'triangle';
+                if (maExact.has(i)) return 'circle';
+                if (maClose.has(i)) return 'rectRot';
+                return 'triangle';
             }
             return 'circle';
         });
@@ -1228,27 +1483,32 @@ function updateChart(data) {
 
     // Create Boundary chart if enabled
     if (runBoundary) {
-        const boundaryTp = boundaryMatchedIndices.size;
-        const boundaryFp = boundaryDetectedIndices.length - boundaryTp;
-        const canvas = createChartContainer('boundary', 'Boundary Analysis', '#06b6d4', boundaryTp, boundaryFp);
+        const { tp: boundaryTp, cm: boundaryCm, fp: boundaryFp, exactMatches: boundaryExact, closeMatches: boundaryClose } = boundaryClassification;
+        const canvas = createChartContainer('boundary', 'Boundary Analysis', '#06b6d4', boundaryTp, boundaryCm, boundaryFp);
         const ctx = canvas.getContext('2d');
 
         const boundaryPointColors = values.map((_, i) => {
             if (boundaryDetectedIndices.includes(i)) {
-                return boundaryMatchedIndices.has(i) ? '#f87171' : '#f97316';
+                if (boundaryExact.has(i)) return '#f87171';
+                if (boundaryClose.has(i)) return '#fde047';
+                return '#f97316';
             }
             return 'transparent';
         });
         const boundaryPointBorders = values.map((_, i) => {
             if (boundaryDetectedIndices.includes(i)) {
-                return boundaryMatchedIndices.has(i) ? '#ef4444' : '#ea580c';
+                if (boundaryExact.has(i)) return '#ef4444';
+                if (boundaryClose.has(i)) return '#eab308';
+                return '#ea580c';
             }
             return 'transparent';
         });
         const boundaryPointRadii = values.map((_, i) => boundaryDetectedIndices.includes(i) ? 6 : 0);
         const boundaryPointStyles = values.map((_, i) => {
             if (boundaryDetectedIndices.includes(i)) {
-                return boundaryMatchedIndices.has(i) ? 'circle' : 'triangle';
+                if (boundaryExact.has(i)) return 'circle';
+                if (boundaryClose.has(i)) return 'rectRot';
+                return 'triangle';
             }
             return 'circle';
         });
@@ -1318,27 +1578,32 @@ function updateChart(data) {
 
     // Create Threshold Alert chart if enabled
     if (runThreshold) {
-        const thresholdTp = thresholdMatchedIndices.size;
-        const thresholdFp = thresholdDetectedIndices.length - thresholdTp;
-        const canvas = createChartContainer('threshold', `Threshold Alert (>${thresholdPercent}%, offset=${thresholdOffset})`, '#ec4899', thresholdTp, thresholdFp);
+        const { tp: thresholdTp, cm: thresholdCm, fp: thresholdFp, exactMatches: thresholdExact, closeMatches: thresholdClose } = thresholdClassification;
+        const canvas = createChartContainer('threshold', `Threshold Alert (>${thresholdPercent}%, offset=${thresholdOffset})`, '#ec4899', thresholdTp, thresholdCm, thresholdFp);
         const ctx = canvas.getContext('2d');
 
         const thresholdPointColors = values.map((_, i) => {
             if (thresholdDetectedIndices.includes(i)) {
-                return thresholdMatchedIndices.has(i) ? '#f87171' : '#f97316';
+                if (thresholdExact.has(i)) return '#f87171';
+                if (thresholdClose.has(i)) return '#fde047';
+                return '#f97316';
             }
             return 'transparent';
         });
         const thresholdPointBorders = values.map((_, i) => {
             if (thresholdDetectedIndices.includes(i)) {
-                return thresholdMatchedIndices.has(i) ? '#ef4444' : '#ea580c';
+                if (thresholdExact.has(i)) return '#ef4444';
+                if (thresholdClose.has(i)) return '#eab308';
+                return '#ea580c';
             }
             return 'transparent';
         });
         const thresholdPointRadii = values.map((_, i) => thresholdDetectedIndices.includes(i) ? 6 : 0);
         const thresholdPointStyles = values.map((_, i) => {
             if (thresholdDetectedIndices.includes(i)) {
-                return thresholdMatchedIndices.has(i) ? 'circle' : 'triangle';
+                if (thresholdExact.has(i)) return 'circle';
+                if (thresholdClose.has(i)) return 'rectRot';
+                return 'triangle';
             }
             return 'circle';
         });
@@ -1369,6 +1634,122 @@ function updateChart(data) {
         stackedCharts.push(chart);
     }
 
+    // Create Sliding Window chart if enabled
+    if (runSlidingWindow) {
+        const { tp: slidingWindowTp, cm: slidingWindowCm, fp: slidingWindowFp, exactMatches: slidingWindowExact, closeMatches: slidingWindowClose } = slidingWindowClassification;
+        const canvas = createChartContainer('slidingWindow', `Sliding Window (N=${slidingWindowSize}, M=${slidingWindowOffset}, >${slidingWindowThreshold}%)`, '#14b8a6', slidingWindowTp, slidingWindowCm, slidingWindowFp);
+        const ctx = canvas.getContext('2d');
+
+        const slidingWindowPointColors = values.map((_, i) => {
+            if (slidingWindowDetectedIndices.includes(i)) {
+                if (slidingWindowExact.has(i)) return '#f87171';
+                if (slidingWindowClose.has(i)) return '#fde047';
+                return '#f97316';
+            }
+            return 'transparent';
+        });
+        const slidingWindowPointBorders = values.map((_, i) => {
+            if (slidingWindowDetectedIndices.includes(i)) {
+                if (slidingWindowExact.has(i)) return '#ef4444';
+                if (slidingWindowClose.has(i)) return '#eab308';
+                return '#ea580c';
+            }
+            return 'transparent';
+        });
+        const slidingWindowPointRadii = values.map((_, i) => slidingWindowDetectedIndices.includes(i) ? 6 : 0);
+        const slidingWindowPointStyles = values.map((_, i) => {
+            if (slidingWindowDetectedIndices.includes(i)) {
+                if (slidingWindowExact.has(i)) return 'circle';
+                if (slidingWindowClose.has(i)) return 'rectRot';
+                return 'triangle';
+            }
+            return 'circle';
+        });
+
+        const isLast = enabledMethods[enabledMethods.length - 1] === 'slidingWindow';
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Sliding Window Detection',
+                    data: values,
+                    borderColor: '#94a3b8',
+                    backgroundColor: 'rgba(148, 163, 184, 0.1)',
+                    borderWidth: 1.5,
+                    fill: true,
+                    tension: 0,
+                    pointBackgroundColor: slidingWindowPointColors,
+                    pointBorderColor: slidingWindowPointBorders,
+                    pointBorderWidth: 1.5,
+                    pointRadius: slidingWindowPointRadii,
+                    pointHoverRadius: 8,
+                    pointStyle: slidingWindowPointStyles,
+                }]
+            },
+            options: getChartOptions(createAnnotations(), isLast)
+        });
+        stackedCharts.push(chart);
+    }
+
+    // Create Std Dev chart if enabled
+    if (runStdDev) {
+        const { tp: stdDevTp, cm: stdDevCm, fp: stdDevFp, exactMatches: stdDevExact, closeMatches: stdDevClose } = stdDevClassification;
+        const canvas = createChartContainer('stdDev', `Std Dev (M=${stdDevWindow}, K=${stdDevNum}σ)`, '#a855f7', stdDevTp, stdDevCm, stdDevFp);
+        const ctx = canvas.getContext('2d');
+
+        const stdDevPointColors = values.map((_, i) => {
+            if (stdDevDetectedIndices.includes(i)) {
+                if (stdDevExact.has(i)) return '#f87171';
+                if (stdDevClose.has(i)) return '#fde047';
+                return '#f97316';
+            }
+            return 'transparent';
+        });
+        const stdDevPointBorders = values.map((_, i) => {
+            if (stdDevDetectedIndices.includes(i)) {
+                if (stdDevExact.has(i)) return '#ef4444';
+                if (stdDevClose.has(i)) return '#eab308';
+                return '#ea580c';
+            }
+            return 'transparent';
+        });
+        const stdDevPointRadii = values.map((_, i) => stdDevDetectedIndices.includes(i) ? 6 : 0);
+        const stdDevPointStyles = values.map((_, i) => {
+            if (stdDevDetectedIndices.includes(i)) {
+                if (stdDevExact.has(i)) return 'circle';
+                if (stdDevClose.has(i)) return 'rectRot';
+                return 'triangle';
+            }
+            return 'circle';
+        });
+
+        const isLast = enabledMethods[enabledMethods.length - 1] === 'stdDev';
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Std Dev Detection',
+                    data: values,
+                    borderColor: '#94a3b8',
+                    backgroundColor: 'rgba(148, 163, 184, 0.1)',
+                    borderWidth: 1.5,
+                    fill: true,
+                    tension: 0,
+                    pointBackgroundColor: stdDevPointColors,
+                    pointBorderColor: stdDevPointBorders,
+                    pointBorderWidth: 1.5,
+                    pointRadius: stdDevPointRadii,
+                    pointHoverRadius: 8,
+                    pointStyle: stdDevPointStyles,
+                }]
+            },
+            options: getChartOptions(createAnnotations(), isLast)
+        });
+        stackedCharts.push(chart);
+    }
+
     // If no methods enabled, show a message
     if (enabledMethods.length === 0) {
         stackedChartsContainer.innerHTML = `
@@ -1378,9 +1759,40 @@ function updateChart(data) {
         `;
     }
 
-    // Store MA result for stats display
-    data._maResult = maResult;
-    data._maMatchedIndices = maMatchedIndices;
+    // Store all results for accuracy metrics display
+    data._methodResults = {
+        otava: runOtavaCheckbox.checked ? {
+            name: 'Otava',
+            classification: otavaClassification,
+            detectedIndices: detectedIndices
+        } : null,
+        ma: runMa ? {
+            name: 'Moving Average',
+            classification: maClassification,
+            detectedIndices: maDetectedIndices
+        } : null,
+        boundary: runBoundary ? {
+            name: 'Boundary',
+            classification: boundaryClassification,
+            detectedIndices: boundaryDetectedIndices
+        } : null,
+        threshold: runThreshold ? {
+            name: 'Threshold Alert',
+            classification: thresholdClassification,
+            detectedIndices: thresholdDetectedIndices
+        } : null,
+        slidingWindow: runSlidingWindow ? {
+            name: 'Sliding Window',
+            classification: slidingWindowClassification,
+            detectedIndices: slidingWindowDetectedIndices
+        } : null,
+        stdDev: runStdDev ? {
+            name: 'Std Dev',
+            classification: stdDevClassification,
+            detectedIndices: stdDevDetectedIndices
+        } : null
+    };
+    data._groundTruthCount = groundTruthIndices.length;
 }
 
 // Update statistics display
@@ -1403,23 +1815,64 @@ function updateStats(data) {
 
 // Update accuracy metrics display
 function updateAccuracyMetrics(data) {
-    if (!data.accuracy) {
-        metricPrecision.textContent = '-';
-        metricRecall.textContent = '-';
-        metricF1.textContent = '-';
-        metricTp.textContent = '-';
-        metricFp.textContent = '-';
-        metricFn.textContent = '-';
+    // Clear the table
+    accuracyTableBody.innerHTML = '';
+
+    const methodResults = data._methodResults;
+    const groundTruthCount = data._groundTruthCount || 0;
+
+    if (!methodResults) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="8" class="empty-message">No analysis methods enabled</td>';
+        accuracyTableBody.appendChild(row);
         return;
     }
 
-    const acc = data.accuracy;
-    metricPrecision.textContent = (acc.precision * 100).toFixed(0) + '%';
-    metricRecall.textContent = (acc.recall * 100).toFixed(0) + '%';
-    metricF1.textContent = (acc.f1_score * 100).toFixed(0) + '%';
-    metricTp.textContent = acc.true_positives;
-    metricFp.textContent = acc.false_positives;
-    metricFn.textContent = acc.false_negatives;
+    // Add a row for each enabled method
+    const methodOrder = ['otava', 'ma', 'boundary', 'threshold', 'slidingWindow', 'stdDev'];
+    let hasAnyMethod = false;
+
+    for (const methodKey of methodOrder) {
+        const method = methodResults[methodKey];
+        if (!method) continue;
+
+        hasAnyMethod = true;
+        const { tp, cm, fp } = method.classification;
+
+        // FN = ground truth not matched by any detection (exact or close)
+        // Since each method is evaluated independently, FN = groundTruthCount - (tp + cm)
+        const fn = Math.max(0, groundTruthCount - tp - cm);
+
+        // Calculate precision, recall, F1
+        // For precision: TP+CM are "good" detections, FP are bad
+        const totalDetected = tp + cm + fp;
+        const precision = totalDetected > 0 ? (tp + cm) / totalDetected : 0;
+
+        // For recall: how many ground truth were found (exactly or closely)
+        const recall = groundTruthCount > 0 ? (tp + cm) / groundTruthCount : 0;
+
+        // F1 score
+        const f1 = (precision + recall) > 0 ? 2 * precision * recall / (precision + recall) : 0;
+
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td><strong>${method.name}</strong></td>
+            <td>${tp}</td>
+            <td>${cm}</td>
+            <td>${fp}</td>
+            <td>${fn}</td>
+            <td>${(precision * 100).toFixed(0)}%</td>
+            <td>${(recall * 100).toFixed(0)}%</td>
+            <td>${(f1 * 100).toFixed(0)}%</td>
+        `;
+        accuracyTableBody.appendChild(row);
+    }
+
+    if (!hasAnyMethod) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="8" class="empty-message">No analysis methods enabled</td>';
+        accuracyTableBody.appendChild(row);
+    }
 }
 
 // Update comparison tables
@@ -1705,6 +2158,544 @@ async function showAllPatterns() {
         console.error('Failed to load all patterns:', error);
     } finally {
         document.body.classList.remove('loading');
+    }
+}
+
+// ==========================================
+// Mix Mode Functions
+// ==========================================
+
+/**
+ * Refresh the current display - calls the appropriate update function based on mode
+ */
+function refreshDisplay() {
+    if (mixMode && mixComponents.length > 0) {
+        computeAndDisplayMixedData();
+    } else {
+        generateData();
+    }
+}
+
+/**
+ * Toggle between Single Pattern and Mix Patterns mode
+ */
+function toggleMixMode(enable) {
+    mixMode = enable;
+
+    // Update button states
+    modeSingleBtn.classList.toggle('active', !enable);
+    modeMixBtn.classList.toggle('active', enable);
+
+    // Toggle mix info visibility
+    mixInfo.classList.toggle('hidden', !enable);
+
+    // Toggle grid class
+    generatorGrid.classList.toggle('mix-mode', enable);
+
+    // Clear mix state when switching modes
+    if (enable) {
+        clearMix();
+        updateMixDisplay();
+    } else {
+        // Clear badges and restore normal tile behavior
+        clearMix();
+        // Re-render the selected generator in single mode
+        if (selectedGenerator) {
+            generateData();
+        }
+    }
+
+    // Rebuild grid for mix mode layout
+    populateGeneratorGrid();
+}
+
+/**
+ * Toggle between Sum and Append operations
+ */
+function toggleMixOperation() {
+    mixOperation = mixOperation === 'sum' ? 'append' : 'sum';
+    updateMixDisplay();
+    if (mixComponents.length > 0) {
+        computeAndDisplayMixedData();
+    }
+    // Update the operation tile
+    const opTile = document.querySelector('.operation-tile');
+    if (opTile) {
+        const opLabel = opTile.querySelector('.op-label');
+        if (opLabel) {
+            opLabel.textContent = mixOperation.toUpperCase();
+        }
+    }
+}
+
+/**
+ * Patterns that should have randomized x-axis positions when added to mix
+ */
+const RANDOMIZE_POSITION_PATTERNS = [
+    'outlier', 'outlier_clean', 'outlier_uniform',
+    'step_function', 'step_function_clean', 'step_function_uniform',
+    'regression_fix', 'regression_fix_clean', 'regression_fix_uniform'
+];
+
+/**
+ * Shift an array by a given offset, padding with the first value (no wrapping)
+ * Positive offset shifts the pattern to the right
+ */
+function shiftArray(arr, offset) {
+    if (offset === 0) return [...arr];
+    const n = arr.length;
+    const firstVal = arr[0];
+
+    if (offset > 0) {
+        // Shift right: pad beginning with first value, truncate end
+        const padding = new Array(offset).fill(firstVal);
+        return [...padding, ...arr.slice(0, n - offset)];
+    } else {
+        // Shift left: truncate beginning, pad end with last value
+        const lastVal = arr[n - 1];
+        const padding = new Array(-offset).fill(lastVal);
+        return [...arr.slice(-offset), ...padding];
+    }
+}
+
+/**
+ * Add a generator to the mix
+ */
+async function addToMix(generatorName) {
+    const length = parseInt(lengthInput.value);
+    const seed = parseInt(seedInput.value);
+
+    try {
+        document.body.classList.add('loading');
+
+        // Fetch data for this generator
+        const params = new URLSearchParams({ length, seed });
+        const response = await fetch(`/api/generate/${generatorName}?${params}`);
+        const result = await response.json();
+
+        if (result.error) {
+            console.error('Error fetching generator data:', result.error);
+            return;
+        }
+
+        let data = result.data;
+        let changePoints = result.ground_truth?.change_points || result.change_points || [];
+
+        // For certain patterns, randomize the x-axis position by shifting the data
+        if (RANDOMIZE_POSITION_PATTERNS.includes(generatorName)) {
+            // Generate a random offset (can be positive or negative, avoiding edges)
+            const margin = Math.floor(length * 0.15);  // 15% margin from edges
+            const maxShift = Math.floor(length * 0.35);  // Max 35% shift in either direction
+            const randomOffset = Math.floor(Math.random() * (2 * maxShift + 1)) - maxShift;
+
+            // Shift the data array (no wrapping)
+            data = shiftArray(data, randomOffset);
+
+            // Adjust change point indices, clamping to valid range
+            changePoints = changePoints.map(cp => ({
+                ...cp,
+                index: Math.max(0, Math.min(length - 1, cp.index + randomOffset))
+            }));
+        }
+
+        // Check if this generator is already in the mix
+        const existingIdx = mixComponents.findIndex(c => c.name === generatorName);
+        if (existingIdx >= 0) {
+            // For patterns with randomized positions, always add as new instance
+            if (RANDOMIZE_POSITION_PATTERNS.includes(generatorName)) {
+                mixComponents[existingIdx].count++;
+                // Store additional instances with their own data/changePoints
+                if (!mixComponents[existingIdx].instances) {
+                    mixComponents[existingIdx].instances = [{
+                        data: mixComponents[existingIdx].data,
+                        changePoints: mixComponents[existingIdx].changePoints
+                    }];
+                }
+                mixComponents[existingIdx].instances.push({ data, changePoints });
+            } else {
+                // Increment count for non-randomized patterns
+                mixComponents[existingIdx].count++;
+            }
+        } else {
+            // Add new component
+            const component = {
+                name: generatorName,
+                displayName: generators[generatorName]?.name || generatorName,
+                data: data,
+                changePoints: changePoints,
+                params: { length, seed },
+                count: 1
+            };
+            // For randomizable patterns, track instances
+            if (RANDOMIZE_POSITION_PATTERNS.includes(generatorName)) {
+                component.instances = [{ data, changePoints }];
+            }
+            mixComponents.push(component);
+        }
+
+        // Update display
+        updateMixDisplay();
+        updateTileBadges();
+        computeAndDisplayMixedData();
+
+    } catch (error) {
+        console.error('Failed to add generator to mix:', error);
+    } finally {
+        document.body.classList.remove('loading');
+    }
+}
+
+/**
+ * Remove one instance of a generator from the mix
+ */
+function removeFromMix(generatorName) {
+    const idx = mixComponents.findIndex(c => c.name === generatorName);
+    if (idx >= 0) {
+        const comp = mixComponents[idx];
+        comp.count--;
+
+        // For patterns with instances, also remove the last instance
+        if (comp.instances && comp.instances.length > 0) {
+            comp.instances.pop();
+        }
+
+        if (comp.count <= 0) {
+            mixComponents.splice(idx, 1);
+        }
+
+        updateMixDisplay();
+        updateTileBadges();
+        if (mixComponents.length > 0) {
+            computeAndDisplayMixedData();
+        } else {
+            // Clear charts when no components
+            stackedChartsContainer.innerHTML = `
+                <div class="stacked-chart" style="text-align: center; padding: 2rem;">
+                    <p style="color: #64748b;">Click patterns to add to the mix...</p>
+                </div>
+            `;
+        }
+    }
+}
+
+/**
+ * Clear all mix state
+ */
+function clearMix() {
+    mixComponents = [];
+    mixedData = null;
+    mixedChangePoints = [];
+    mixOperation = 'sum';
+    tileBadges = {};
+    updateMixDisplay();
+    updateTileBadges();
+
+    if (mixMode) {
+        // Clear charts
+        stackedChartsContainer.innerHTML = `
+            <div class="stacked-chart" style="text-align: center; padding: 2rem;">
+                <p style="color: #64748b;">Click patterns to add to the mix...</p>
+            </div>
+        `;
+        // Reset generator info
+        generatorTitle.textContent = 'Mix Patterns';
+        generatorDescription.textContent = 'Click on patterns to combine them';
+        changePointInfo.classList.add('hidden');
+
+        // Update the operation tile
+        const opTile = document.querySelector('.operation-tile');
+        if (opTile) {
+            const opLabel = opTile.querySelector('.op-label');
+            if (opLabel) {
+                opLabel.textContent = 'SUM';
+            }
+        }
+    }
+}
+
+/**
+ * Sum operation: add data arrays element-wise, cycling shorter arrays
+ * Then normalize to keep the mean at a reasonable baseline
+ */
+function sumMix(components) {
+    if (components.length === 0) return { data: [], changePoints: [] };
+
+    // Calculate max length considering counts
+    let maxLen = 0;
+    for (const comp of components) {
+        maxLen = Math.max(maxLen, comp.data.length);
+    }
+
+    // Initialize result array
+    const result = new Array(maxLen).fill(0);
+    const allChangePoints = [];
+
+    // Add each component
+    for (const comp of components) {
+        if (comp.instances) {
+            // For patterns with randomized positions, use each instance's data
+            for (const instance of comp.instances) {
+                for (let j = 0; j < maxLen; j++) {
+                    result[j] += instance.data[j % instance.data.length];
+                }
+                // Collect change points from each instance
+                for (const cp of instance.changePoints) {
+                    allChangePoints.push({ ...cp });
+                }
+            }
+        } else {
+            // For regular patterns, use count
+            for (let i = 0; i < comp.count; i++) {
+                for (let j = 0; j < maxLen; j++) {
+                    result[j] += comp.data[j % comp.data.length];
+                }
+            }
+            // Collect change points (once per component type for non-instance patterns)
+            for (const cp of comp.changePoints) {
+                allChangePoints.push({ ...cp });
+            }
+        }
+    }
+
+    // Deduplicate change points by index+type
+    const changePointsMap = {};
+    for (const cp of allChangePoints) {
+        const key = `${cp.index}-${cp.type}`;
+        if (!changePointsMap[key]) {
+            changePointsMap[key] = cp;
+        }
+    }
+
+    // Normalize: shift the result so the mean matches the first component's mean
+    const firstData = components[0].instances ? components[0].instances[0].data : components[0].data;
+    const targetMean = firstData.reduce((a, b) => a + b, 0) / firstData.length;
+    const currentMean = result.reduce((a, b) => a + b, 0) / result.length;
+    const shift = targetMean - currentMean;
+
+    for (let i = 0; i < result.length; i++) {
+        result[i] += shift;
+    }
+
+    return {
+        data: result,
+        changePoints: Object.values(changePointsMap)
+    };
+}
+
+/**
+ * Append operation: concatenate data arrays, offsetting change points
+ */
+function appendMix(components) {
+    if (components.length === 0) return { data: [], changePoints: [] };
+
+    const result = [];
+    const changePoints = [];
+    let offset = 0;
+
+    for (const comp of components) {
+        if (comp.instances) {
+            // For patterns with randomized positions, use each instance
+            for (const instance of comp.instances) {
+                result.push(...instance.data);
+
+                for (const cp of instance.changePoints) {
+                    changePoints.push({
+                        ...cp,
+                        index: cp.index + offset,
+                        description: `${cp.description || cp.type} (from ${comp.displayName})`
+                    });
+                }
+
+                offset += instance.data.length;
+            }
+        } else {
+            // For regular patterns, use count
+            for (let i = 0; i < comp.count; i++) {
+                result.push(...comp.data);
+
+                for (const cp of comp.changePoints) {
+                    changePoints.push({
+                        ...cp,
+                        index: cp.index + offset,
+                        description: `${cp.description || cp.type} (from ${comp.displayName})`
+                    });
+                }
+
+                offset += comp.data.length;
+            }
+        }
+    }
+
+    return { data: result, changePoints };
+}
+
+/**
+ * Compute mixed data based on current operation
+ */
+function computeMixedData() {
+    if (mixComponents.length === 0) {
+        mixedData = null;
+        mixedChangePoints = [];
+        return;
+    }
+
+    const mixResult = mixOperation === 'sum'
+        ? sumMix(mixComponents)
+        : appendMix(mixComponents);
+
+    mixedData = mixResult.data;
+    mixedChangePoints = mixResult.changePoints;
+}
+
+/**
+ * Compute mixed data and display in charts
+ */
+async function computeAndDisplayMixedData() {
+    computeMixedData();
+
+    if (!mixedData || mixedData.length === 0) {
+        return;
+    }
+
+    // Create a fake response object to pass to updateChart
+    const fakeData = {
+        generator: 'mixed',
+        data: mixedData,
+        ground_truth: {
+            change_points: mixedChangePoints,
+            count: mixedChangePoints.filter(cp => cp.type !== 'outlier').length
+        },
+        otava: null,  // Will be computed by updateChart if checkbox is enabled
+    };
+
+    // Run Otava analysis on mixed data if enabled
+    if (runOtavaCheckbox.checked) {
+        try {
+            const params = new URLSearchParams({
+                window_len: windowLenInput.value,
+                max_pvalue: maxPvalueInput.value,
+            });
+            const response = await fetch(`/api/detect?${params}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ data: mixedData })
+            });
+            const otavaResult = await response.json();
+            if (!otavaResult.error) {
+                fakeData.otava = otavaResult;
+            }
+        } catch (error) {
+            console.error('Failed to run Otava on mixed data:', error);
+        }
+    }
+
+    updateChart(fakeData);
+    updateStats(fakeData);
+    updateAccuracyMetrics(fakeData);
+    updateMixComparisonTables(fakeData);
+    updateGeneratorInfo();
+
+    // Show chart sections
+    document.querySelector('.stacked-charts-container').classList.remove('hidden');
+    document.querySelector('.chart-legend').classList.remove('hidden');
+    statsSection.classList.remove('hidden');
+    accuracyMetrics.classList.remove('hidden');
+    cpDetail.classList.remove('hidden');
+    multiChartContainer.classList.add('hidden');
+}
+
+/**
+ * Update comparison tables for mix mode
+ */
+function updateMixComparisonTables(data) {
+    truthTableBody.innerHTML = '';
+    detectedTableBody.innerHTML = '';
+
+    const groundTruth = data.ground_truth?.change_points || [];
+    const detected = data.otava?.detected_change_points || [];
+
+    // Ground truth table
+    if (groundTruth.length === 0) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="4" class="empty-message">No ground truth change points</td>';
+        truthTableBody.appendChild(row);
+    } else {
+        groundTruth.forEach(cp => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><strong>${cp.index}</strong></td>
+                <td>${cp.type}</td>
+                <td>${cp.description || '-'}</td>
+                <td>-</td>
+            `;
+            truthTableBody.appendChild(row);
+        });
+    }
+
+    // Detected table
+    if (!detected || detected.length === 0) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="5" class="empty-message">No change points detected by Otava</td>';
+        detectedTableBody.appendChild(row);
+    } else {
+        detected.forEach(cp => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><strong>${cp.index}</strong></td>
+                <td>${cp.mean_before?.toFixed(2) || '-'}</td>
+                <td>${cp.mean_after?.toFixed(2) || '-'}</td>
+                <td>${cp.pvalue?.toExponential(2) || '-'}</td>
+                <td>-</td>
+            `;
+            detectedTableBody.appendChild(row);
+        });
+    }
+}
+
+/**
+ * Update the mix recipe display
+ */
+function updateMixDisplay() {
+    if (mixComponents.length === 0) {
+        mixRecipe.innerHTML = 'Click patterns to add...';
+        return;
+    }
+
+    const parts = mixComponents.map(comp => {
+        const countStr = comp.count > 1 ? `${comp.count}x ` : '';
+        return `<span class="component">${countStr}${comp.displayName}</span>`;
+    });
+
+    const opSymbol = mixOperation === 'sum' ? '+' : '&rarr;';
+    mixRecipe.innerHTML = parts.join(`<span class="operation"> ${opSymbol} </span>`);
+}
+
+/**
+ * Update count badges on tiles
+ */
+function updateTileBadges() {
+    // Remove all existing badges
+    document.querySelectorAll('.tile-count-badge').forEach(badge => badge.remove());
+
+    // Remove in-mix class from all tiles
+    document.querySelectorAll('.generator-tile').forEach(tile => {
+        tile.classList.remove('in-mix');
+    });
+
+    if (!mixMode) return;
+
+    // Add badges for components in mix
+    for (const comp of mixComponents) {
+        const tile = document.querySelector(`.generator-tile[data-generator="${comp.name}"]`);
+        if (tile) {
+            tile.classList.add('in-mix');
+            if (comp.count > 0) {
+                const badge = document.createElement('div');
+                badge.className = 'tile-count-badge';
+                badge.textContent = comp.count;
+                tile.appendChild(badge);
+            }
+        }
     }
 }
 

@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import FastAPI, Request, Query
+from fastapi import FastAPI, Request, Query, Body
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -1286,7 +1287,7 @@ async def generate_data(
     seed: int = Query(default=42),
     run_otava: bool = Query(default=False, description="Run Otava analysis"),
     window_len: int = Query(default=30, ge=5, le=100, description="Otava window length"),
-    max_pvalue: float = Query(default=0.05, ge=0.00001, le=1.0, description="Otava max p-value"),
+    max_pvalue: float = Query(default=0.00001, ge=0.0, le=1.0, description="Otava max p-value"),
     tolerance: int = Query(default=5, ge=0, le=50, description="Accuracy tolerance"),
     # Dynamic params will be passed as query parameters
     request: Request = None,
@@ -1339,7 +1340,7 @@ async def analyze_with_otava(
     length: int = Query(default=200, ge=10, le=2000),
     seed: int = Query(default=42),
     window_len: int = Query(default=30, ge=5, le=100, description="Otava window length"),
-    max_pvalue: float = Query(default=0.05, ge=0.00001, le=1.0, description="Otava max p-value"),
+    max_pvalue: float = Query(default=0.00001, ge=0.0, le=1.0, description="Otava max p-value"),
     min_magnitude: float = Query(default=0.0, ge=0, description="Minimum change magnitude"),
     tolerance: int = Query(default=5, ge=0, le=50, description="Accuracy tolerance"),
     request: Request = None,
@@ -1434,6 +1435,41 @@ async def get_benchmark_suite(
         "seed": seed,
         "series": [timeseries_to_dict(ts) for ts in all_series[:50]],  # Limit for web
     }
+
+
+class DetectRequest(BaseModel):
+    """Request body for change point detection."""
+    data: list[float]
+
+
+@app.post("/api/detect")
+async def detect_change_points(
+    request: DetectRequest,
+    window_len: int = Query(default=30, ge=5, le=100, description="Otava window length"),
+    max_pvalue: float = Query(default=0.00001, ge=0.0, le=1.0, description="Otava max p-value"),
+    min_magnitude: float = Query(default=0.0, ge=0, description="Minimum change magnitude"),
+):
+    """Run Otava change point detection on arbitrary data."""
+    if not request.data:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "No data provided"},
+        )
+
+    try:
+        data_array = np.array(request.data)
+        result = run_otava_analysis(
+            data_array,
+            window_len=window_len,
+            max_pvalue=max_pvalue,
+            min_magnitude=min_magnitude,
+        )
+        return result
+    except Exception as e:
+        return JSONResponse(
+            status_code=400,
+            content={"error": str(e)},
+        )
 
 
 def run():

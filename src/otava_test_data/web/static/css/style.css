@@ -1175,6 +1175,14 @@ footer a:hover {
     height: 10px;
 }
 
+.legend-marker.close-match {
+    background: #fde047;
+    border: 2px solid #eab308;
+    width: 10px;
+    height: 10px;
+    transform: rotate(45deg);
+}
+
 .legend-marker.false-positive {
     background: transparent;
     border-radius: 0;
@@ -1221,6 +1229,32 @@ footer a:hover {
     grid-column: 1 / -1;
     margin: 0 0 0.25rem 0;
     color: #ec4899;
+    font-size: 0.9rem;
+}
+
+/* Sliding Window Controls Section */
+.sliding-window-controls {
+    border-left: 3px solid #14b8a6;
+}
+
+.sliding-window-controls .section-title,
+.sliding-window-controls .panel-title {
+    grid-column: 1 / -1;
+    margin: 0 0 0.25rem 0;
+    color: #14b8a6;
+    font-size: 0.9rem;
+}
+
+/* Std Dev Controls Section */
+.stddev-controls {
+    border-left: 3px solid #a855f7;
+}
+
+.stddev-controls .section-title,
+.stddev-controls .panel-title {
+    grid-column: 1 / -1;
+    margin: 0 0 0.25rem 0;
+    color: #a855f7;
     font-size: 0.9rem;
 }
 
@@ -1397,6 +1431,52 @@ footer a:hover {
     font-weight: 700;
 }
 
+/* Accuracy Table */
+.accuracy-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.accuracy-table th,
+.accuracy-table td {
+    padding: 0.4rem 0.6rem;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+}
+
+.accuracy-table th {
+    background: var(--background);
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+}
+
+.accuracy-table th:first-child,
+.accuracy-table td:first-child {
+    text-align: left;
+}
+
+.accuracy-table tbody tr:hover {
+    background: var(--background);
+}
+
+.accuracy-table td:nth-child(2) { color: #ef4444; }  /* TP - red */
+.accuracy-table td:nth-child(3) { color: #eab308; }  /* CM - yellow */
+.accuracy-table td:nth-child(4) { color: #f97316; }  /* FP - orange */
+.accuracy-table td:nth-child(5) { color: #64748b; }  /* FN - gray */
+.accuracy-table td:nth-child(6) { color: #10b981; }  /* Precision - green */
+.accuracy-table td:nth-child(7) { color: #3b82f6; }  /* Recall - blue */
+.accuracy-table td:nth-child(8) { color: #8b5cf6; }  /* F1 - purple */
+
+.accuracy-table .empty-message {
+    color: var(--text-secondary);
+    font-style: italic;
+    text-align: center;
+}
+
 /* Comparison Tables */
 .comparison-tables {
     display: grid;
@@ -1538,6 +1618,14 @@ footer a:hover {
     background: #ec4899;
 }
 
+.stacked-chart-header .method-indicator.slidingWindow {
+    background: #14b8a6;
+}
+
+.stacked-chart-header .method-indicator.stdDev {
+    background: #a855f7;
+}
+
 .stacked-chart-header .detection-count {
     margin-left: auto;
     font-size: 0.8rem;
@@ -1556,6 +1644,172 @@ footer a:hover {
 /* First chart (Otava) gets more height */
 .stacked-chart:first-child canvas {
     height: 300px !important;
+}
+
+/* Mix Mode Styles */
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.section-header .section-title {
+    margin: 0;
+}
+
+.mode-toggle {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.mode-btn {
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.mode-btn:hover {
+    background: var(--background);
+    border-color: var(--secondary-color);
+}
+
+.mode-btn.active {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+/* Mix info panel */
+.mix-info {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.5rem 0.75rem;
+    background: linear-gradient(135deg, #1e3a5f, #1e293b);
+    border-radius: 6px;
+    margin-bottom: 0.5rem;
+}
+
+.mix-info.hidden {
+    display: none;
+}
+
+.mix-recipe {
+    color: #94a3b8;
+    font-size: 0.85rem;
+    flex: 1;
+}
+
+.mix-recipe .component {
+    color: #60a5fa;
+    font-weight: 600;
+}
+
+.mix-recipe .operation {
+    color: #f97316;
+    font-weight: 600;
+    padding: 0 0.25rem;
+}
+
+.clear-mix-btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.clear-mix-btn:hover {
+    background: rgba(239, 68, 68, 0.3);
+    border-color: rgba(239, 68, 68, 0.5);
+}
+
+/* Hidden rows in mix mode */
+.generator-grid.mix-mode .row-3-tile,
+.generator-grid.mix-mode .row-4-tile {
+    display: none;
+}
+
+/* Count badge on tiles */
+.generator-tile {
+    position: relative;
+}
+
+.tile-count-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    background: #ef4444;
+    color: white;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    z-index: 10;
+}
+
+/* Operation tile in mix mode */
+.operation-tile {
+    background: #1e293b !important;
+    border: 2px solid #3b82f6 !important;
+    cursor: pointer;
+    min-height: 80px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.operation-tile:hover {
+    background: #1e3a5f !important;
+    border-color: #60a5fa !important;
+}
+
+.operation-tile .op-label {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #60a5fa;
+    text-transform: uppercase;
+}
+
+.operation-tile .op-hint {
+    font-size: 0.65rem;
+    color: #64748b;
+    margin-top: 0.25rem;
+}
+
+/* Mix mode tile highlight */
+.generator-grid.mix-mode .generator-tile:not(.placeholder):not(.operation-tile) {
+    cursor: pointer;
+}
+
+.generator-grid.mix-mode .generator-tile:not(.placeholder):not(.operation-tile):hover {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+.generator-grid.mix-mode .generator-tile.in-mix {
+    background: linear-gradient(135deg, #1e3a5f, #1e293b);
+    border-color: #3b82f6;
+}
+
+.generator-grid.mix-mode .generator-tile.in-mix .generator-tile-name {
+    color: white;
 }
 
 /* Responsive */
