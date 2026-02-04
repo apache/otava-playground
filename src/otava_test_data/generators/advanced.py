@@ -256,7 +256,6 @@ def multiple_amplitude_changes_clean(
     data = np.empty(length, dtype=np.float64)
     change_points = []
     prev_index = 0
-    print(data, change_indexes, amplitude_changes, length)
     for change_index, amplitude_change in zip(np.append(change_indexes, length), [1.0] + amplitude_changes):
 
         if change_index < 1 or change_index > length:
@@ -264,7 +263,6 @@ def multiple_amplitude_changes_clean(
 
         # Generate x values for the cosine
         x = np.arange(prev_index, change_index) * 2 * np.pi / period
-        print(prev_index, change_index)
         data[prev_index:change_index] = baseline + amplitude_change * amplitude * np.cos(x  )
 
         change_points.append(
