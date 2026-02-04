@@ -133,6 +133,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
     setupTutorialHandlers();
     updateGeneratorInfo();
+    updateDynamicParams();
     await generateData();
 });
 
@@ -225,11 +226,11 @@ async function populateGeneratorGrid() {
             'outlier_clean',
             'step_function_clean',
             'regression_fix_clean',
-            'variance_change_clean',
+            'amplitude_change_clean',
             'phase_change_clean',
             'banding_clean'
         ];
-        const mixRow1Names = mixRow1Order.filter(name => generatorNames.includes(name));
+        const mixRow1Names = mixRow1Order;//.filter(name => generatorNames.includes(name));
 
         // Create pattern tiles
         for (const name of mixRow1Names) {
@@ -261,26 +262,24 @@ async function populateGeneratorGrid() {
             'outlier_clean',
             'step_function_clean',
             'regression_fix_clean',
-            'variance_change_clean',
+            'amplitude_change_clean',
             'phase_change_clean',
-            'banding_clean'
+            'banding_clean',
         ];
-        const row1Names = row1Order.filter(name => generatorNames.includes(name));
+        const row1Names = row1Order;//.filter(name => generatorNames.includes(name));
         orderedNames.push(...row1Names);
 
         // Row 2 - multiple clean patterns (with placeholder)
         const row2Order = [
             '__placeholder__',
             'multiple_outliers_clean',
-            'multiple_changes_clean',
+            'multiple_changes',
             'multiple_regression_fix_clean',
-            'multiple_variance_changes_clean',
+            'multiple_amplitude_changes_clean',
             'multiple_phase_changes_clean',
             'multiple_banding_clean'
         ];
-        const row2Names = row2Order.filter(name =>
-            name === '__placeholder__' || generatorNames.includes(name)
-        );
+        const row2Names = row2Order;
         orderedNames.push(...row2Names);
 
         // Row 3 - normal noise single patterns
@@ -293,7 +292,7 @@ async function populateGeneratorGrid() {
             'phase_change',
             'banding'
         ];
-        const row3Names = row3Order.filter(name => generatorNames.includes(name));
+        const row3Names = row3Order;//.filter(name => generatorNames.includes(name));
         orderedNames.push(...row3Names);
 
         // Row 4 - uniform noise single patterns
@@ -306,7 +305,7 @@ async function populateGeneratorGrid() {
             'phase_change_uniform',
             'banding_uniform'
         ];
-        const row4Names = row4Order.filter(name => generatorNames.includes(name));
+        const row4Names = row4Order;//.filter(name => generatorNames.includes(name));
         orderedNames.push(...row4Names);
 
         // Track line break positions
@@ -329,6 +328,8 @@ async function populateGeneratorGrid() {
             }
 
             const info = generators[name];
+            console.info(name);
+            console.info(info);
             const tile = createGeneratorTile(name, info, previewData[name], false);
             generatorGrid.appendChild(tile);
 
@@ -802,7 +803,7 @@ function updateDynamicParams() {
             inputContainer.className = 'input-with-help';
 
             const input = document.createElement('input');
-            input.type = 'number';
+            input.type = paramInfo.type;
             input.id = `param-${paramName}`;
             input.name = paramName;
             input.value = paramInfo.default;

@@ -16,7 +16,7 @@ def banding(
     value1: float = 100.0,
     value2: float = 105.0,
     sigma: float = 0.0,
-    seed: int | None = None,
+    seed: int | None = 42,
 ) -> TimeSeries:
     """
     Generate a banding time series - oscillating randomly between two values.
@@ -68,7 +68,7 @@ def variance_change(
     sigma_before: float = 2.0,
     sigma_after: float = 10.0,
     change_index: int | None = None,
-    seed: int | None = None,
+    seed: int | None = 42,
 ) -> TimeSeries:
     """
     Generate a time series with constant mean but changing variance.
@@ -134,7 +134,7 @@ def phase_change(
     change_index: int | None = None,
     phase_shift: float = np.pi / 2,  # Default: cos -> sin (90 degree shift)
     sigma: float = 0.0,
-    seed: int | None = None,
+    seed: int | None = 42,
 ) -> TimeSeries:
     """
     Generate a time series with constant mean and variance but phase changes.
@@ -205,13 +205,103 @@ def phase_change(
         },
     )
 
+def amplitude_change_clean(
+    length: int,
+    amplitude: float = 10.0,
+    baseline: float = 100.0,
+    period: int = 20,
+    amplitude_change: float = 1.5,
+    change_index: int | None = None,
+    seed: int | None = 42,
+    sigma: float | None = None
+) -> TimeSeries:
+    change_indexes = None if change_index is None else [change_index]
+    amplitude_changes = None if amplitude_change is None else [amplitude_change]
+    return multiple_amplitude_changes_clean(length, amplitude, baseline, period, amplitude_changes, change_indexes)
+
+def multiple_amplitude_changes_clean(
+    length: int,
+    amplitude: float = 10.0,
+    baseline: float = 100.0,
+    period: int = 100,
+    amplitude_changes: list[float] = [1.5, 1.3, 1.4],
+    change_indexes: list[int] | None = None,
+    seed: int | None = 42,
+    sigma: float | None = None
+) -> TimeSeries:
+    """
+    Generate a time series with constant mean, but a change in amplitude (aka variance).
+
+    S = cos(x)..., 1.5 * cos(x)...
+
+    Args:
+        length: Number of data points.
+        amplitude: Amplitude of the oscillation.
+        baseline: Baseline value around which oscillation occurs.
+        period: Number of points per cycle.
+        amplitude_changes: Multiply amplitude beginning at change_index(es). If change_indexes is also given, must be same length
+        change_indexes: List of positions of the amplitude change(s). If None, randomly generate len(amplitude_changes) indexes
+
+    Returns:
+        TimeSeries with N change points where the mean remains constant but amplitude (and hence variance) change.
+    """
+    _ = seed
+    _ = sigma
+    rng = np.full(length, baseline)
+
+    if change_indexes is None:
+        change_indexes = np.random.randint(low=0, high=length, size=len(amplitude_changes))
+        change_indexes.sort()
+
+    data = np.empty(length, dtype=np.float64)
+    change_points = []
+    prev_index = 0
+    print(data, change_indexes, amplitude_changes, length)
+    for change_index, amplitude_change in zip(np.append(change_indexes, length), [1.0] + amplitude_changes):
+
+        if change_index < 1 or change_index > length:
+                raise ValueError(f"change_index must be in [1, {length}], got {change_index}")
+
+        # Generate x values for the cosine
+        x = np.arange(prev_index, change_index) * 2 * np.pi / period
+        print(prev_index, change_index)
+        data[prev_index:change_index] = baseline + amplitude_change * amplitude * np.cos(x  )
+
+        change_points.append(
+            ChangePoint(
+                index=change_index,
+                change_type="amplitude",
+                before_value=amplitude,
+                after_value=amplitude*amplitude_change,
+                description=f"Amplitude change {amplitude_change:.3f}x",
+            )
+        )
+        prev_index = change_index
+
+
+    return TimeSeries(
+        data=data,
+        change_points=change_points,
+        generator_name="amplitude_change",
+        parameters={
+            "length": length,
+            "amplitude": amplitude,
+            "baseline": baseline,
+            "period": period,
+            "change_index": change_index,
+            "amplitude_change": amplitude_change,
+            "sigma": sigma,
+            "seed": seed,
+        },
+    )
+
 
 def multiple_changes(
     length: int,
     values: list[float] | None = None,
     change_indices: list[int] | None = None,
     sigma: float = 0.0,
-    seed: int | None = None,
+    seed: int | None = 42,
 ) -> TimeSeries:
     """
     Generate a time series with multiple consecutive changes.
@@ -306,6 +396,27 @@ def multiple_changes(
         },
     )
 
+def outlier_clean(
+    length: int,
+    baseline: float = 100.0,
+    outlier_value: float = 150.0,
+    outlier_index: int | None = None,
+    seed: int | None = 42,
+) -> TimeSeries:
+    idx = None if outlier_index is None else [int]
+    return multiple_outliers_clean(length, baseline, outlier_value, idx, 1, 0, seed)
+
+def multiple_outliers_clean(
+    length: int,
+    baseline: float = 100.0,
+    outlier_value: float = 150.0,
+    outlier_indices: list[int] | None = None,
+    n_outliers: int = 3,
+    sigma: int | None = 0,
+    seed: int | None = 42,
+) -> TimeSeries:
+    t = multiple_outliers(length, baseline, outlier_value, outlier_indices, n_outliers, 0, seed)
+    return t
 
 def multiple_outliers(
     length: int,
@@ -314,7 +425,7 @@ def multiple_outliers(
     outlier_indices: list[int] | None = None,
     n_outliers: int = 3,
     sigma: float = 0.0,
-    seed: int | None = None,
+    seed: int | None = 42,
 ) -> TimeSeries:
     """
     Generate a time series with multiple outliers.
@@ -377,12 +488,13 @@ def multiple_outliers(
     )
 
 
+
 def multiple_variance_changes(
     length: int,
     mean: float = 100.0,
     sigmas: list[float] | None = None,
     change_indices: list[int] | None = None,
-    seed: int | None = None,
+    seed: int | None = 42,
 ) -> TimeSeries:
     """
     Generate a time series with multiple variance changes.
@@ -450,6 +562,16 @@ def multiple_variance_changes(
         },
     )
 
+def multiple_regression_fix_clean(
+    length: int,
+    value_normal: float = 100.0,
+    value_regression: float = 130.0,
+    n_regressions: int = 3,
+    regression_duration: int | None = None,
+    sigma: float = 0.0,
+    seed: int | None = 42,
+) -> TimeSeries:
+    return multiple_regression_fix(length, value_normal, value_regression,n_regressions,regression_duration, 0.0, seed)
 
 def multiple_regression_fix(
     length: int,
@@ -458,7 +580,7 @@ def multiple_regression_fix(
     n_regressions: int = 3,
     regression_duration: int | None = None,
     sigma: float = 0.0,
-    seed: int | None = None,
+    seed: int | None = 42,
 ) -> TimeSeries:
     """
     Generate a time series with multiple regression+fix cycles.
@@ -492,7 +614,6 @@ def multiple_regression_fix(
         # Start of regression
         reg_start = segment_length * (2 * i + 1)
         reg_end = min(reg_start + regression_duration, length)
-
         if reg_start < length:
             data[reg_start:reg_end] = value_regression
             change_points.append(
@@ -536,9 +657,9 @@ def multiple_regression_fix(
 
 def multiple_banding(
     length: int,
-    value_pairs: list[tuple[float, float]] | None = None,
+    values: list[float] | str | None = [80,103,130],
     sigma: float = 0.0,
-    seed: int | None = None,
+    seed: int | None = 42,
 ) -> TimeSeries:
     """
     Generate a time series with multiple banding segments.
@@ -547,8 +668,7 @@ def multiple_banding(
 
     Args:
         length: Number of data points.
-        value_pairs: List of (value1, value2) tuples for each segment.
-                    If None, defaults to 3 segments with different pairs.
+        value_pairs: list() of floats. The graph consists of these constants + sigma. A comma separated string is acceptable.
         sigma: If > 0, add normal noise with this standard deviation.
         seed: Random seed for reproducibility.
 
@@ -557,50 +677,44 @@ def multiple_banding(
     """
     rng = np.random.default_rng(seed)
 
-    if value_pairs is None:
-        value_pairs = [(95.0, 105.0), (100.0, 115.0), (90.0, 100.0)]
+    if values is None:
+        values = [95.0, 105.0, 100.0]
+    if isinstance(values, str):
+        values = values.split(",")
+        values =[float(s) for s in values]
 
-    n_segments = len(value_pairs)
-    segment_length = length // n_segments
-
-    data = np.empty(length, dtype=np.float64)
+    data = np.random.randint(size=length, low=0, high=3)
     change_points = []
 
-    for i, (v1, v2) in enumerate(value_pairs):
-        start = i * segment_length
-        end = (i + 1) * segment_length if i < n_segments - 1 else length
-        segment_len = end - start
-
-        # Random banding within this segment
-        choices = rng.choice([v1, v2], size=segment_len)
-        data[start:end] = choices
-
-        if i > 0:
-            change_points.append(
-                ChangePoint(
-                    index=start,
-                    change_type="banding_change",
-                    before_value=value_pairs[i-1][0],
-                    after_value=v1,
-                    description=f"Banding change to ({v1}, {v2})",
-                )
-            )
+    for i in range(length):
+        data[i] = values[data[i]]
 
     if sigma > 0:
         data += rng.normal(0, sigma, length)
 
     return TimeSeries(
         data=data,
-        change_points=change_points,
+        change_points=[],
         generator_name="multiple_banding",
         parameters={
             "length": length,
-            "value_pairs": value_pairs,
+            "values": values,
             "sigma": sigma,
             "seed": seed,
         },
     )
 
+
+def multiple_phase_changes_clean(
+    length: int,
+    amplitude: float = 10.0,
+    baseline: float = 100.0,
+    period: int = 20,
+    n_changes: int = 3,
+    sigma: float = 0.0,
+    seed: int | None = 42,
+) -> TimeSeries:
+    return multiple_phase_changes(length, amplitude, baseline, period, n_changes, 0.0, 42)
 
 def multiple_phase_changes(
     length: int,
@@ -609,7 +723,7 @@ def multiple_phase_changes(
     period: int = 20,
     n_changes: int = 3,
     sigma: float = 0.0,
-    seed: int | None = None,
+    seed: int | None = 42,
 ) -> TimeSeries:
     """
     Generate a time series with multiple phase changes.
@@ -683,7 +797,7 @@ def outlier_uniform(
     outlier_value: float = 150.0,
     outlier_index: int | None = None,
     noise_range: float = 10.0,
-    seed: int | None = None,
+    seed: int | None = 42,
 ) -> TimeSeries:
     """Single outlier with uniform noise."""
     rng = np.random.default_rng(seed)
@@ -720,7 +834,7 @@ def step_function_uniform(
     value_after: float = 120.0,
     change_index: int | None = None,
     noise_range: float = 10.0,
-    seed: int | None = None,
+    seed: int | None = 42,
 ) -> TimeSeries:
     """Step function with uniform noise."""
     rng = np.random.default_rng(seed)
@@ -758,7 +872,7 @@ def regression_fix_uniform(
     regression_start: int | None = None,
     regression_duration: int = 20,
     noise_range: float = 10.0,
-    seed: int | None = None,
+    seed: int | None = 42,
 ) -> TimeSeries:
     """Regression + fix pattern with uniform noise."""
     rng = np.random.default_rng(seed)
@@ -798,7 +912,7 @@ def banding_uniform(
     value1: float = 100.0,
     value2: float = 105.0,
     noise_range: float = 4.0,
-    seed: int | None = None,
+    seed: int | None = 42,
 ) -> TimeSeries:
     """Banding pattern with uniform noise."""
     rng = np.random.default_rng(seed)
@@ -821,7 +935,7 @@ def phase_change_uniform(
     period: int = 20,
     change_index: int | None = None,
     noise_range: float = 4.0,
-    seed: int | None = None,
+    seed: int | None = 42,
 ) -> TimeSeries:
     """Phase change with uniform noise."""
     rng = np.random.default_rng(seed)

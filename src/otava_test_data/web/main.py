@@ -35,14 +35,20 @@ from otava_test_data.generators.basic import (
 )
 from otava_test_data.generators.advanced import (
     banding,
+    outlier_clean,
     variance_change,
     phase_change,
+    amplitude_change_clean,
+    multiple_amplitude_changes_clean,
     multiple_changes,
     multiple_outliers,
+    multiple_outliers_clean,
     multiple_variance_changes,
     multiple_regression_fix,
+    multiple_regression_fix_clean,
     multiple_banding,
     multiple_phase_changes,
+    multiple_phase_changes_clean,
     # Uniform noise variants
     outlier_uniform,
     step_function_uniform,
@@ -299,6 +305,16 @@ GENERATORS = {
                               "this is the system's normal operating pattern.",
         },
     },
+    "multiple_banding_clean": {
+        "func": multiple_banding,
+        "name": "Multiple Banding (Clean)",
+        "description": "Clean multiple banding segments",
+        "category": "clean",
+        "has_change_points": False,
+        "params": {
+            "values":  {"type": "list", "default": [80, 103, 130]},
+        },
+    },
     "variance_change": {
         "func": variance_change,
         "name": "Variance Change",
@@ -317,6 +333,38 @@ GENERATORS = {
             "sigma_after": {
                 "type": "float", "default": 10.0, "min": 0.1, "max": 30, "step": 0.5,
                 "tooltip": "Standard deviation after the change (higher = more volatile)",
+            },
+        },
+        "tutorial": {
+            "explanation": "The mean stays exactly the same, but the spread (variance) changes. "
+                          "Data becomes more volatile (or more stable) at the change point. "
+                          "This is a subtler change than a mean shift.",
+            "use_case": "Represents a system becoming less reliable without changing average "
+                       "performance: response times stay the same on average but become "
+                       "unpredictable, or a stabilization effort that reduces jitter.",
+            "detection_notes": "Tests detection of variance changes, which are harder to spot than "
+                              "mean shifts. Some detectors only look for mean changes and will miss "
+                              "this. Statistical tests like F-test or Levene's test are needed.",
+        },
+    },
+    "amplitude_change_clean": {
+        "func": amplitude_change_clean,
+        "name": "Amplitude Change (Clean)",
+        "description": "Constant mean, changing amplitude/variance",
+        "category": "advanced",
+        "has_change_points": True,
+        "params": {
+            "amplitude": {
+                "type": "float", "default": 10.0, "min": 1, "max": 50, "step": 1,
+                "tooltip": "Height of the oscillation (peak to baseline)",
+            },
+            "baseline": {
+                "type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1,
+                "tooltip": "Center value around which the wave oscillates",
+            },
+            "amplitude_change": {
+                "type": "float", "default": 3.0, "min": 0.0, "max": 10.0, "step": 0.1,
+                "tooltip": "Change in amplitude: multiplier",
             },
         },
         "tutorial": {
@@ -365,6 +413,56 @@ GENERATORS = {
             "detection_notes": "Extremely difficult to detect with standard methods since mean and "
                               "variance don't change. Requires frequency-domain analysis or "
                               "specialized phase detection. Most detectors will miss this.",
+        },
+    },
+    "phase_change_clean": {
+        "func": phase_change,
+        "name": "Phase Change (Clean)",
+        "description": "Phase shift: cos(x) → sin(x)",
+        "category": "advanced",
+        "has_change_points": True,
+        "params": {
+            "amplitude": {
+                "type": "float", "default": 10.0, "min": 1, "max": 50, "step": 1,
+                "tooltip": "Height of the oscillation (peak to baseline)",
+            },
+            "baseline": {
+                "type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1,
+                "tooltip": "Center value around which the wave oscillates",
+            },
+            "period": {
+                "type": "int", "default": 20, "min": 5, "max": 100, "step": 1,
+                "tooltip": "How many points for one complete cycle",
+            },
+            "sigma": {
+                "type": "float", "default": 2.0, "min": 0, "max": 0, "step": 0.0,
+                "tooltip": "NO Random noise added to the wave",
+            },
+        },
+        "tutorial": {
+            "explanation": "Generates a periodic (wave-like) signal that changes phase at the "
+                          "midpoint. Before: cosine wave (starts at peak). After: sine wave "
+                          "(starts at zero). Mean and variance remain the same.",
+            "use_case": "Rare in performance data, but tests edge cases. Could represent timing "
+                       "or synchronization changes, clock drift corrections, or periodic process "
+                       "scheduling changes.",
+            "detection_notes": "Extremely difficult to detect with standard methods since mean and "
+                              "variance don't change. Requires frequency-domain analysis or "
+                              "specialized phase detection. Most detectors will miss this.",
+        },
+    },
+    "multiple_phase_changes_clean": {
+        "func": multiple_phase_changes_clean,
+        "name": "Multiple Phase Changes (Clean)",
+        "description": "Clean multiple phase shifts",
+        "category": "clean",
+        "has_change_points": True,
+        "params": {
+            "amplitude": {"type": "float", "default": 10.0, "min": 1, "max": 50, "step": 1},
+            "baseline": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
+            "period": {"type": "int", "default": 20, "min": 5, "max": 100, "step": 1},
+            "n_changes": {"type": "int", "default": 3, "min": 1, "max": 10, "step": 1},
+            "sigma": {"type": "float", "default": 0.0, "min": 0, "max": 20, "step": 0.5},
         },
     },
     "multiple_changes": {
@@ -573,9 +671,37 @@ GENERATORS = {
         },
     },
     "outlier_clean": {
-        "func": outlier,
+        "func": outlier_clean,
         "name": "Single Outlier (Clean)",
         "description": "Clean single anomaly point without noise",
+        "category": "clean",
+        "has_change_points": False,
+        "params": {
+            "baseline": {
+                "type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1,
+                "tooltip": "The normal value for most data points",
+            },
+            "outlier_value": {
+                "type": "float", "default": 150.0, "min": 0, "max": 500, "step": 1,
+                "tooltip": "The anomalous value at the outlier point",
+            },
+        },
+        "tutorial": {
+            "explanation": "A perfectly clean baseline with a single visible spike. The outlier "
+                          "is maximally obvious against the flat baseline, making it easy to "
+                          "see the difference between an outlier and a change point.",
+            "use_case": "Educational visualization contrasting outliers with change points. "
+                       "The single spike clearly returns to baseline, demonstrating that "
+                       "this is not a persistent change.",
+            "detection_notes": "This is an OUTLIER, not a change point. Some detectors may flag "
+                              "it, but the behavior is transient. Compare with step_function_clean "
+                              "to see the difference.",
+        },
+    },
+    "multiple_outliers_clean": {
+        "func": multiple_outliers_clean,
+        "name": "Multiple Outliers (Clean)",
+        "description": "Many single anomaly points without noise",
         "category": "clean",
         "has_change_points": False,
         "params": {
@@ -602,6 +728,147 @@ GENERATORS = {
             "detection_notes": "This is an OUTLIER, not a change point. Some detectors may flag "
                               "it, but the behavior is transient. Compare with step_function_clean "
                               "to see the difference.",
+        },
+    },
+    "multiple_regression_fix_clean": {
+        "func": multiple_regression_fix_clean,
+        "name": "Multiple Regression + Fix (Clean)",
+        "description": "Temporary regression without noise",
+        "category": "clean",
+        "has_change_points": True,
+        "params": {
+            "value_normal": {
+                "type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1,
+                "tooltip": "The normal system value (before and after the regression)",
+            },
+            "value_regression": {
+                "type": "float", "default": 130.0, "min": 0, "max": 500, "step": 1,
+                "tooltip": "The degraded value during the regression period",
+            },
+            "regression_duration": {
+                "type": "int", "default": 20, "min": 2, "max": 100, "step": 1,
+                "tooltip": "How many data points the regression lasts",
+            },
+            "sigma": {
+                "type": "float", "default": 0.0, "min": 0, "max": 20, "step": 0.5,
+                "tooltip": "Set to 0 for perfectly clean signal (increase to add noise)",
+            },
+        },
+        "tutorial": {
+            "explanation": "A clean visualization of a temporary regression pattern. Shows the "
+                          "three distinct levels (normal, regression, normal) without any noise "
+                          "obscuring the transitions.",
+            "use_case": "Educational tool for understanding the regression-fix pattern. Both "
+                       "change points (regression start and fix) are perfectly visible.",
+            "detection_notes": "Both change points should be trivially detectable. Verify that "
+                              "your detector finds exactly two change points at the correct locations.",
+        },
+    },
+    "multiple_amplitude_changes_clean": {
+        "func": multiple_amplitude_changes_clean,
+        "name": "Multiple Amplitude Changes (Clean)",
+        "description": "Multiple amplitude/variance changes, constant mean, zero noise",
+        "category": "advanced",
+        "has_change_points": True,
+        "params": {
+            "amplitude": {
+                "type": "float", "default": 10.0, "min": 1, "max": 100, "step": 1,
+                "tooltip": "Height of the oscillation (peak to baseline)",
+            },
+            "baseline": {
+                "type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1,
+                "tooltip": "Center value around which the wave oscillates",
+            },
+            "period": {
+                "type": "int", "default": 20, "min": 5, "max": 100, "step": 1,
+                "tooltip": "How many points for one complete cycle",
+            },
+        },
+        "tutorial": {
+            "explanation": "The mean stays constant while variance changes multiple times. "
+                          "Data alternates between stable and volatile periods, creating "
+                          "multiple variance change points to detect.",
+            "use_case": "Represents a system that goes through phases of stability and instability: "
+                       "periodic maintenance windows, varying load conditions, or intermittent "
+                       "environmental factors affecting reliability.",
+            "detection_notes": "Combines the difficulty of variance detection with multiple change "
+                              "points. Tests advanced detection capabilities. Many simple detectors "
+                              "will fail on this pattern.",
+        }
+    },
+            # Uniform noise variants (Row 4)
+    "outlier_uniform": {
+        "func": outlier_uniform,
+        "name": "Single Outlier (Uniform)",
+        "description": "Single outlier with uniform noise",
+        "category": "uniform",
+        "has_change_points": False,
+        "params": {
+            "baseline": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
+            "outlier_value": {"type": "float", "default": 150.0, "min": 0, "max": 500, "step": 1},
+            "noise_range": {"type": "float", "default": 10.0, "min": 0, "max": 50, "step": 1},
+        },
+    },
+    "step_function_uniform": {
+        "func": step_function_uniform,
+        "name": "Step Function (Uniform)",
+        "description": "Step change with uniform noise",
+        "category": "uniform",
+        "has_change_points": True,
+        "params": {
+            "value_before": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
+            "value_after": {"type": "float", "default": 120.0, "min": 0, "max": 500, "step": 1},
+            "noise_range": {"type": "float", "default": 10.0, "min": 0, "max": 50, "step": 1},
+        },
+    },
+    "regression_fix_uniform": {
+        "func": regression_fix_uniform,
+        "name": "Regression + Fix (Uniform)",
+        "description": "Regression pattern with uniform noise",
+        "category": "uniform",
+        "has_change_points": True,
+        "params": {
+            "value_normal": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
+            "value_regression": {"type": "float", "default": 130.0, "min": 0, "max": 500, "step": 1},
+            "regression_duration": {"type": "int", "default": 20, "min": 2, "max": 100, "step": 1},
+            "noise_range": {"type": "float", "default": 10.0, "min": 0, "max": 50, "step": 1},
+        },
+    },
+    "variance_change_uniform": {
+        "func": variance_change,
+        "name": "Variance Change (Uniform)",
+        "description": "Variance change (inherent variance pattern)",
+        "category": "uniform",
+        "has_change_points": True,
+        "params": {
+            "mean": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
+            "sigma_before": {"type": "float", "default": 2.0, "min": 0.1, "max": 30, "step": 0.5},
+            "sigma_after": {"type": "float", "default": 10.0, "min": 0.1, "max": 30, "step": 0.5},
+        },
+    },
+    "phase_change_uniform": {
+        "func": phase_change_uniform,
+        "name": "Phase Change (Uniform)",
+        "description": "Phase shift with uniform noise",
+        "category": "uniform",
+        "has_change_points": True,
+        "params": {
+            "amplitude": {"type": "float", "default": 10.0, "min": 1, "max": 50, "step": 1},
+            "baseline": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
+            "period": {"type": "int", "default": 20, "min": 5, "max": 100, "step": 1},
+            "noise_range": {"type": "float", "default": 4.0, "min": 0, "max": 20, "step": 0.5},
+        },
+    },
+    "banding_uniform": {
+        "func": banding_uniform,
+        "name": "Banding (Uniform)",
+        "description": "Banding with uniform noise",
+        "category": "uniform",
+        "has_change_points": False,
+        "params": {
+            "value1": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
+            "value2": {"type": "float", "default": 110.0, "min": 0, "max": 500, "step": 1},
+            "noise_range": {"type": "float", "default": 4.0, "min": 0, "max": 20, "step": 0.5},
         },
     },
 }
@@ -851,31 +1118,6 @@ DETECTION_METRICS_TUTORIAL = {
             ),
         },
     },
-    "variance_change_clean": {
-        "func": variance_change,
-        "name": "Variance Change (Clean)",
-        "description": "Clean variance change pattern",
-        "category": "clean",
-        "has_change_points": True,
-        "params": {
-            "mean": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
-            "sigma_before": {"type": "float", "default": 0.5, "min": 0.1, "max": 30, "step": 0.5},
-            "sigma_after": {"type": "float", "default": 8.0, "min": 0.1, "max": 30, "step": 0.5},
-        },
-    },
-    "phase_change_clean": {
-        "func": phase_change,
-        "name": "Phase Change (Clean)",
-        "description": "Clean phase shift without noise",
-        "category": "clean",
-        "has_change_points": True,
-        "params": {
-            "amplitude": {"type": "float", "default": 10.0, "min": 1, "max": 50, "step": 1},
-            "baseline": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
-            "period": {"type": "int", "default": 20, "min": 5, "max": 100, "step": 1},
-            "sigma": {"type": "float", "default": 0.0, "min": 0, "max": 20, "step": 0.5},
-        },
-    },
     "multiple_outliers_clean": {
         "func": multiple_outliers,
         "name": "Multiple Outliers (Clean)",
@@ -889,18 +1131,8 @@ DETECTION_METRICS_TUTORIAL = {
             "sigma": {"type": "float", "default": 0.0, "min": 0, "max": 20, "step": 0.5},
         },
     },
-    "multiple_variance_changes_clean": {
-        "func": multiple_variance_changes,
-        "name": "Multiple Variance Changes (Clean)",
-        "description": "Clean multiple variance changes pattern",
-        "category": "clean",
-        "has_change_points": True,
-        "params": {
-            "mean": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
-        },
-    },
     "multiple_regression_fix_clean": {
-        "func": multiple_regression_fix,
+        "func": multiple_regression_fix_clean,
         "name": "Multiple Regression + Fix (Clean)",
         "description": "Clean multiple regression+fix cycles",
         "category": "clean",
@@ -917,13 +1149,14 @@ DETECTION_METRICS_TUTORIAL = {
         "name": "Multiple Banding (Clean)",
         "description": "Clean multiple banding segments",
         "category": "clean",
-        "has_change_points": True,
+        "has_change_points": False,
         "params": {
+            "values":  {"type": "list", "default": [80, 130]},
             "sigma": {"type": "float", "default": 0.0, "min": 0, "max": 20, "step": 0.5},
         },
     },
     "multiple_phase_changes_clean": {
-        "func": multiple_phase_changes,
+        "func": multiple_phase_changes_clean,
         "name": "Multiple Phase Changes (Clean)",
         "description": "Clean multiple phase shifts",
         "category": "clean",
@@ -936,79 +1169,17 @@ DETECTION_METRICS_TUTORIAL = {
             "sigma": {"type": "float", "default": 0.0, "min": 0, "max": 20, "step": 0.5},
         },
     },
-    # Uniform noise variants (Row 4)
-    "outlier_uniform": {
-        "func": outlier_uniform,
-        "name": "Single Outlier (Uniform)",
-        "description": "Single outlier with uniform noise",
-        "category": "uniform",
-        "has_change_points": False,
-        "params": {
-            "baseline": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
-            "outlier_value": {"type": "float", "default": 150.0, "min": 0, "max": 500, "step": 1},
-            "noise_range": {"type": "float", "default": 10.0, "min": 0, "max": 50, "step": 1},
-        },
-    },
-    "step_function_uniform": {
-        "func": step_function_uniform,
-        "name": "Step Function (Uniform)",
-        "description": "Step change with uniform noise",
-        "category": "uniform",
-        "has_change_points": True,
-        "params": {
-            "value_before": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
-            "value_after": {"type": "float", "default": 120.0, "min": 0, "max": 500, "step": 1},
-            "noise_range": {"type": "float", "default": 10.0, "min": 0, "max": 50, "step": 1},
-        },
-    },
-    "regression_fix_uniform": {
-        "func": regression_fix_uniform,
-        "name": "Regression + Fix (Uniform)",
-        "description": "Regression pattern with uniform noise",
-        "category": "uniform",
+    "multiple_changes": {
+        "func": multiple_changes,
+        "name": "Multiple Step Changes",
+        "description": "Multiple step changes with noise",
+        "category": "normal",
         "has_change_points": True,
         "params": {
             "value_normal": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
             "value_regression": {"type": "float", "default": 130.0, "min": 0, "max": 500, "step": 1},
-            "regression_duration": {"type": "int", "default": 20, "min": 2, "max": 100, "step": 1},
-            "noise_range": {"type": "float", "default": 10.0, "min": 0, "max": 50, "step": 1},
-        },
-    },
-    "variance_change_uniform": {
-        "func": variance_change,
-        "name": "Variance Change (Uniform)",
-        "description": "Variance change (inherent variance pattern)",
-        "category": "uniform",
-        "has_change_points": True,
-        "params": {
-            "mean": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
-            "sigma_before": {"type": "float", "default": 2.0, "min": 0.1, "max": 30, "step": 0.5},
-            "sigma_after": {"type": "float", "default": 10.0, "min": 0.1, "max": 30, "step": 0.5},
-        },
-    },
-    "phase_change_uniform": {
-        "func": phase_change_uniform,
-        "name": "Phase Change (Uniform)",
-        "description": "Phase shift with uniform noise",
-        "category": "uniform",
-        "has_change_points": True,
-        "params": {
-            "amplitude": {"type": "float", "default": 10.0, "min": 1, "max": 50, "step": 1},
-            "baseline": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
-            "period": {"type": "int", "default": 20, "min": 5, "max": 100, "step": 1},
-            "noise_range": {"type": "float", "default": 4.0, "min": 0, "max": 20, "step": 0.5},
-        },
-    },
-    "banding_uniform": {
-        "func": banding_uniform,
-        "name": "Banding (Uniform)",
-        "description": "Banding with uniform noise",
-        "category": "uniform",
-        "has_change_points": False,
-        "params": {
-            "value1": {"type": "float", "default": 100.0, "min": 0, "max": 500, "step": 1},
-            "value2": {"type": "float", "default": 110.0, "min": 0, "max": 500, "step": 1},
-            "noise_range": {"type": "float", "default": 4.0, "min": 0, "max": 20, "step": 0.5},
+            "n_regressions": {"type": "int", "default": 3, "min": 1, "max": 10, "step": 1},
+            "sigma": {"type": "float", "default": 0.0, "min": 0, "max": 20, "step": 0.5},
         },
     },
 }
