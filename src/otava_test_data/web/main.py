@@ -1457,8 +1457,8 @@ async def generate_data(
     length: int = Query(default=200, ge=10, le=2000),
     seed: int = Query(default=42),
     run_otava: bool = Query(default=False, description="Run Otava analysis"),
-    window_len: int = Query(default=30, ge=5, le=100, description="Otava window length"),
-    max_pvalue: float = Query(default=0.00001, ge=0.0, le=1.0, description="Otava max p-value"),
+    window_len: int = Query(default=99999, ge=5, le=100000, description="Otava window length"),
+    max_pvalue: float = Query(default=0.01, ge=0.0, le=1.0, description="Otava max p-value"),
     tolerance: int = Query(default=5, ge=0, le=50, description="Accuracy tolerance"),
     # Dynamic params will be passed as query parameters
     request: Request = None,
@@ -1616,8 +1616,8 @@ class DetectRequest(BaseModel):
 @app.post("/api/detect")
 async def detect_change_points(
     request: DetectRequest,
-    window_len: int = Query(default=30, ge=5, le=100, description="Otava window length"),
-    max_pvalue: float = Query(default=0.00001, ge=0.0, le=1.0, description="Otava max p-value"),
+    window_len: int = Query(default=99999, ge=5, le=100000, description="Otava window length"),
+    max_pvalue: float = Query(default=0.01, ge=0.0, le=1.0, description="Otava max p-value"),
     min_magnitude: float = Query(default=0.0, ge=0, description="Minimum change magnitude"),
 ):
     """Run Otava change point detection on arbitrary data."""

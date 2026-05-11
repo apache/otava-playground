@@ -448,8 +448,8 @@ def web_start(c: Context, host: str = "127.0.0.1", port: int = WEB_DEFAULT_PORT,
     # Start in background
     proc = subprocess.Popen(
         cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        # stdout=subprocess.DEVNULL,
+        # stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
 

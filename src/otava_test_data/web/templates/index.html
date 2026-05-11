@@ -126,14 +126,12 @@
                     <div class="panel-fields">
                         <div class="control-group">
                             <label for="window-len-input" class="param-label">Window Length</label>
-                            <input type="number" id="window-len-input" value="30" min="5" max="100" step="5">
+                            <input type="number" id="window-len-input" value="99999" min="5" max="100000" step="5">
                         </div>
                         <div class="control-group">
                             <div class="input-with-help">
                                 <label for="max-pvalue-input" class="param-label">Max P-Value</label>
-                                <!-- These values usually tend to range along a logarithmic scale: 0.05, 0.01, 0.001 etc...
-                                    So we can't use type=number because it would require a thousand clicks to go from 0.1 to 0.0001 -->
-                                <input type="text" id="max-pvalue-input" value="0.001">
+                                <input type="number" id="max-pvalue-input" value="0.01" step="0.01">
                                 <button type="button" class="param-help-btn" data-tooltip="Significance threshold for detecting changes. Lower values mean stricter detection (fewer false positives but may miss subtle changes). 0.05 is standard; use 0.00001 for very high confidence.">?</button>
                             </div>
                         </div>

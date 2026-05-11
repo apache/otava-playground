@@ -507,7 +507,6 @@ function initializeTooltips() {
 // Select a generator from the grid
 function selectGenerator(name) {
     // Update selection state
-    const previousSelected = selectedGenerator;
     selectedGenerator = name;
 
     // Update tile visual state
@@ -784,10 +783,20 @@ function updateGeneratorInfo() {
 
 // Update dynamic parameter inputs
 function updateDynamicParams() {
+    if(mixMode) updateMixParams();
+    else updateSingleParams();
+}
+
+function updateSingleParams() {
     const name = selectedGenerator;
     const info = generators[name];
 
     dynamicParams.innerHTML = '';
+
+    renderParamWidgets(info, dynamicParams);
+}
+
+function renderParamWidgets(info, containerDiv, bindComponent){
 
     if (info && info.params) {
         for (const [paramName, paramInfo] of Object.entries(info.params)) {
@@ -806,11 +815,21 @@ function updateDynamicParams() {
             input.type = paramInfo.type;
             input.id = `param-${paramName}`;
             input.name = paramName;
-            input.value = paramInfo.default;
+            input.value = paramInfo.value || paramInfo.default;
             input.min = paramInfo.min;
             input.max = paramInfo.max;
             input.step = paramInfo.step || 1;
-            input.addEventListener('change', generateData);
+
+            function dynamicParamChanged(ev) {
+                // console.log(ev);
+                if(mixMode && bindComponent){
+                    bindComponent.params[paramName] = ev.target.value;
+                    asyncRedraw(bindComponent);
+                }
+
+            }
+
+            input.addEventListener('change', dynamicParamChanged);
             inputContainer.appendChild(input);
 
             // Add help button if tooltip exists
@@ -826,9 +845,35 @@ function updateDynamicParams() {
 
             div.appendChild(label);
             div.appendChild(inputContainer);
-            dynamicParams.appendChild(div);
+            containerDiv.appendChild(div);
         }
     }
+}
+
+
+function updateMixParams()  {
+    dynamicParams.innerHTML = '';
+    const comps = mixComponents.map( (comp, idx) => {
+        let genInfo = generators[comp.name];
+        // unwrap - this is probably a bug somewhere else
+        // if (genInfo.params && genInfo.params.value)
+        //     genInfo.params = genInfo.params.value;
+        let row = document.createElement('div');
+        row.className = 'param-row';
+        row.id = `param-row-${idx}-${comp.name}`;
+
+        row.innerHTML = `<span class="component">${comp.displayName}</span>: `;
+        renderParamWidgets(genInfo, row, comp);
+
+        dynamicParams.appendChild(row);
+        dynamicParams.appendChild(document.createElement('hr'));
+    });
+
+}
+
+async function asyncRedraw(bindComponent){
+    await generateDataForComponent(bindComponent);
+    refreshDisplay();
 }
 
 // Format parameter name for display
@@ -1030,8 +1075,11 @@ function detectChangePointsStdDev(data, windowSize, numStdDevs) {
     const indices = [];
     const details = [];
 
-    // Need at least windowSize points before we can start
+    // Need at least windowSize points before we can start, and again after each CP
+    let startBoundary = 0;
     for (let i = windowSize; i < data.length; i++) {
+        if (i < startBoundary + windowSize) continue;
+
         // Get the M previous points (not including current point)
         const window = data.slice(i - windowSize, i);
 
@@ -1049,6 +1097,7 @@ function detectChangePointsStdDev(data, windowSize, numStdDevs) {
         const zScore = stdDev > 0 ? (value - mean) / stdDev : 0;
 
         if (value > upperBound || value < lowerBound) {
+            startBoundary = i;
             indices.push(i);
             details.push({
                 index: i,
@@ -1138,6 +1187,7 @@ async function generateData() {
 
         const response = await fetch(`/api/generate/${name}?${params}`);
         const data = await response.json();
+        console.debug(data);
 
         if (data.error) {
             alert(`Error: ${data.error}`);
@@ -2193,9 +2243,9 @@ function toggleMixMode(enable) {
     // Toggle grid class
     generatorGrid.classList.toggle('mix-mode', enable);
 
-    // Clear mix state when switching modes
+    // Clear mix state when switching modes- or maybe not...
     if (enable) {
-        clearMix();
+        //clearMix();
         updateMixDisplay();
     } else {
         // Clear badges and restore normal tile behavior
@@ -2265,21 +2315,51 @@ function shiftArray(arr, offset) {
 async function addToMix(generatorName) {
     const length = parseInt(lengthInput.value);
     const seed = parseInt(seedInput.value);
+    const newComponent = {
+        name: generatorName,
+        displayName: generators[generatorName]?.name || generatorName,
+        params: { length, seed },
+        count: 1
+    };
+    const comp = await generateDataForComponent(newComponent);
+    if (comp){
+        console.log(comp);
+        console.log(newComponent);
+        mixComponents.push(comp);
+        // Update display
+        updateMixDisplay();
+        updateTileBadges();
+        computeAndDisplayMixedData();
+        // refreshDisplay();
+
+    };
+
+
+
+}
+async function generateDataForComponent(comp){
+    const length = parseInt(lengthInput.value);
+    const seed = parseInt(seedInput.value);
+    // const existingComponent = componentIndex >= 0 ? mixComponents[componentIndex] : null;
+    const generatorName = comp.name;
 
     try {
         document.body.classList.add('loading');
 
         // Fetch data for this generator
-        const params = new URLSearchParams({ length, seed });
+        const params = new URLSearchParams(comp.params || { length, seed } );
+        console.log(params);
+
         const response = await fetch(`/api/generate/${generatorName}?${params}`);
         const result = await response.json();
 
         if (result.error) {
             console.error('Error fetching generator data:', result.error);
-            return;
+            return false;
         }
 
         let data = result.data;
+        if (!data) return false;
         let changePoints = result.ground_truth?.change_points || result.change_points || [];
 
         // For certain patterns, randomize the x-axis position by shifting the data
@@ -2300,50 +2380,47 @@ async function addToMix(generatorName) {
         }
 
         // Check if this generator is already in the mix
-        const existingIdx = mixComponents.findIndex(c => c.name === generatorName);
-        if (existingIdx >= 0) {
-            // For patterns with randomized positions, always add as new instance
-            if (RANDOMIZE_POSITION_PATTERNS.includes(generatorName)) {
-                mixComponents[existingIdx].count++;
-                // Store additional instances with their own data/changePoints
-                if (!mixComponents[existingIdx].instances) {
-                    mixComponents[existingIdx].instances = [{
-                        data: mixComponents[existingIdx].data,
-                        changePoints: mixComponents[existingIdx].changePoints
-                    }];
-                }
-                mixComponents[existingIdx].instances.push({ data, changePoints });
-            } else {
-                // Increment count for non-randomized patterns
-                mixComponents[existingIdx].count++;
-            }
-        } else {
+        // const existingIdx = mixComponents.findIndex(c => c.name === generatorName);
+        // if (false && existingIdx >= 0) {
+        //     // For patterns with randomized positions, always add as new instance
+        //     if (RANDOMIZE_POSITION_PATTERNS.includes(generatorName)) {
+        //         mixComponents[existingIdx].count++;
+        //         // Store additional instances with their own data/changePoints
+        //         if (!mixComponents[existingIdx].instances) {
+        //             mixComponents[existingIdx].instances = [{
+        //                 data: mixComponents[existingIdx].data,
+        //                 changePoints: mixComponents[existingIdx].changePoints
+        //             }];
+        //         }
+        //         mixComponents[existingIdx].instances.push({ data, changePoints });
+        //     } else {
+        //         // Increment count for non-randomized patterns
+        //         mixComponents[existingIdx].count++;
+        //     }
+        comp.data = data;
+        comp.changePoints = changePoints;
+        // } else {
             // Add new component
             const component = {
                 name: generatorName,
                 displayName: generators[generatorName]?.name || generatorName,
                 data: data,
                 changePoints: changePoints,
-                params: { length, seed },
+                params: comp.params || { length, seed },
                 count: 1
             };
-            // For randomizable patterns, track instances
-            if (RANDOMIZE_POSITION_PATTERNS.includes(generatorName)) {
-                component.instances = [{ data, changePoints }];
-            }
-            mixComponents.push(component);
+        // For randomizable patterns, track instances
+        if (true || RANDOMIZE_POSITION_PATTERNS.includes(generatorName)) {
+            comp.instances = [{ data, changePoints }];
         }
-
-        // Update display
-        updateMixDisplay();
-        updateTileBadges();
-        computeAndDisplayMixedData();
-
+        // }
+        return comp;
     } catch (error) {
         console.error('Failed to add generator to mix:', error);
     } finally {
         document.body.classList.remove('loading');
     }
+    return false;
 }
 
 /**
@@ -2424,7 +2501,14 @@ function sumMix(components) {
     // Calculate max length considering counts
     let maxLen = 0;
     for (const comp of components) {
-        maxLen = Math.max(maxLen, comp.data.length);
+        if (comp.data) {
+            maxLen = Math.max(maxLen, comp.data.length);
+        }
+        if (comp.instances) {
+            for (const instance of comp.instances) {
+                maxLen = Math.max(maxLen, instance.data.length);
+            }
+        }
     }
 
     // Initialize result array
@@ -2444,7 +2528,7 @@ function sumMix(components) {
                     allChangePoints.push({ ...cp });
                 }
             }
-        } else {
+        } else if (comp.data){
             // For regular patterns, use count
             for (let i = 0; i < comp.count; i++) {
                 for (let j = 0; j < maxLen; j++) {
@@ -2455,6 +2539,9 @@ function sumMix(components) {
             for (const cp of comp.changePoints) {
                 allChangePoints.push({ ...cp });
             }
+        }
+        else {
+            console.warn("Incoming data was still missing when I tried to compute with it.")
         }
     }
 
@@ -2534,6 +2621,7 @@ function appendMix(components) {
  * Compute mixed data based on current operation
  */
 function computeMixedData() {
+    console.log(mixComponents);
     if (mixComponents.length === 0) {
         mixedData = null;
         mixedChangePoints = [];
@@ -2659,8 +2747,10 @@ function updateMixComparisonTables(data) {
 function updateMixDisplay() {
     if (mixComponents.length === 0) {
         mixRecipe.innerHTML = 'Click patterns to add...';
+        dynamicParams.innerHTML = '';
         return;
     }
+    updateMixParams();
 
     const parts = mixComponents.map(comp => {
         const countStr = comp.count > 1 ? `${comp.count}x ` : '';
@@ -2686,19 +2776,19 @@ function updateTileBadges() {
     if (!mixMode) return;
 
     // Add badges for components in mix
+    const sumClicks = {};
     for (const comp of mixComponents) {
         const tile = document.querySelector(`.generator-tile[data-generator="${comp.name}"]`);
         if (tile) {
             tile.classList.add('in-mix');
             if (comp.count > 0) {
+                sumClicks[comp.name] = (sumClicks[comp.name] || 0) + comp.count;
                 const badge = document.createElement('div');
                 badge.className = 'tile-count-badge';
-                badge.textContent = comp.count;
+                badge.textContent = sumClicks[comp.name];
                 tile.appendChild(badge);
             }
         }
     }
 }
 
-// Initialize dynamic params on load
-updateDynamicParams();
