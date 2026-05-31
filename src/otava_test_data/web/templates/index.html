@@ -6,7 +6,7 @@
     <title>Otava Test Data Visualizer</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation"></script>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v={{ version }}">
 </head>
 <body>
     <header>
@@ -53,15 +53,20 @@
     </div>
 
     <main>
-        <!-- Generator Selection Grid -->
-        <section class="generator-grid-section">
+        <!-- Mode toggle stays visible in every mode -->
+        <section class="mode-toggle-section">
             <div class="section-header">
-                <h3 class="section-title">Select Pattern</h3>
+                <h3 class="section-title" id="mode-section-title">Select Pattern</h3>
                 <div class="mode-toggle">
                     <button class="mode-btn active" data-mode="single" id="mode-single-btn">Single Pattern</button>
                     <button class="mode-btn" data-mode="mix" id="mode-mix-btn">Mix Patterns</button>
+                    <button class="mode-btn" data-mode="dataset" id="mode-dataset-btn">Dataset</button>
                 </div>
             </div>
+        </section>
+
+        <!-- Generator Selection Grid -->
+        <section class="generator-grid-section">
             <div class="mix-info hidden" id="mix-info">
                 <span class="mix-recipe" id="mix-recipe">Click patterns to add...</span>
                 <button class="clear-mix-btn" id="clear-mix-btn">Clear</button>
@@ -71,8 +76,28 @@
             </div>
         </section>
 
+        <!-- Dataset Mode: real-world preset or pasted series -->
+        <section class="dataset-section hidden" id="dataset-section">
+            <div class="dataset-row">
+                <label class="dataset-label">
+                    Source:
+                    <select id="dataset-source"></select>
+                </label>
+                <p id="dataset-description" class="dataset-description"></p>
+                <label id="custom-input-wrapper" class="dataset-custom hidden">
+                    Custom series (numbers, comma- or whitespace-separated, or a JSON array):
+                    <textarea id="custom-input" rows="4" placeholder="e.g. 100, 102, 99, 110, ..."></textarea>
+                </label>
+            </div>
+            <p class="dataset-hint">
+                Pick which algorithms to overlay in the
+                <strong>Otava Analysis</strong> panel below.
+            </p>
+            <p class="dataset-status" id="dataset-status" hidden></p>
+        </section>
+
         <!-- Dynamic Parameters -->
-        <section class="controls top-controls" id="params-section">
+        <section class="controls top-controls hide-in-dataset" id="params-section">
             <div id="dynamic-params" class="dynamic-params">
                 <!-- Dynamic parameters will be inserted here -->
             </div>
@@ -88,7 +113,7 @@
             <h3 class="section-title">Analysis Controls</h3>
 
             <div class="analysis-toolbar">
-                <div class="control-actions">
+                <div class="control-actions hide-in-dataset">
                     <button id="generate-btn" class="btn-primary">Analyse</button>
                     <button id="show-all-btn" class="btn-secondary">Show All Graphs</button>
                 </div>
@@ -118,9 +143,27 @@
                 <!-- Otava Analysis Controls -->
                 <div class="controls otava-controls">
                     <div class="panel-header">
-                        <label for="run-otava-checkbox" class="panel-title">Otava Analysis</label>
-                        <input type="checkbox" id="run-otava-checkbox" checked>
+                        <span class="panel-title">Otava Analysis</span>
                         <button class="method-help-btn" data-method="otava" title="Learn about Otava">?</button>
+                    </div>
+
+                    <div class="otava-algos" id="otava-algos">
+                        <label class="otava-algo-row">
+                            <input type="checkbox" class="otava-algo-checkbox"
+                                   data-algo="split" id="otava-algo-split" checked>
+                            split-edivisive <span class="algo-hint">(default)</span>
+                        </label>
+                        <label class="otava-algo-row">
+                            <input type="checkbox" class="otava-algo-checkbox"
+                                   data-algo="orig" id="otava-algo-orig">
+                            orig-edivisive <span class="algo-hint">(permutation test)</span>
+                        </label>
+                        <label class="otava-algo-row">
+                            <input type="checkbox" class="otava-algo-checkbox"
+                                   data-algo="deterministic" id="otava-algo-deterministic">
+                            deterministic-edivisive
+                            <span class="algo-hint">(<a href="https://github.com/apache/otava/pull/154" target="_blank">PR #154</a>)</span>
+                        </label>
                     </div>
 
                     <div class="panel-fields">
@@ -152,7 +195,7 @@
                 </div>
 
                 <!-- Moving Average Analysis Controls -->
-                <div class="controls ma-controls">
+                <div class="controls ma-controls hide-in-dataset">
                     <div class="panel-header">
                         <label for="run-ma-checkbox" class="panel-title">Moving Average Analysis</label>
                         <input type="checkbox" id="run-ma-checkbox">
@@ -187,7 +230,7 @@
                 </div>
 
                 <!-- Boundary Analysis Controls -->
-                <div class="controls boundary-controls">
+                <div class="controls boundary-controls hide-in-dataset">
                     <div class="panel-header">
                         <label for="run-boundary-checkbox" class="panel-title">Boundary Analysis</label>
                         <input type="checkbox" id="run-boundary-checkbox">
@@ -219,7 +262,7 @@
                 </div>
 
                 <!-- Threshold Based Alerts Controls -->
-                <div class="controls threshold-controls">
+                <div class="controls threshold-controls hide-in-dataset">
                     <div class="panel-header">
                         <label for="run-threshold-checkbox" class="panel-title">Threshold Alerts</label>
                         <input type="checkbox" id="run-threshold-checkbox">
@@ -237,7 +280,7 @@
                 </div>
 
                 <!-- Sliding Window Controls -->
-                <div class="controls sliding-window-controls">
+                <div class="controls sliding-window-controls hide-in-dataset">
                     <div class="panel-header">
                         <label for="run-sliding-window-checkbox" class="panel-title">Sliding Window</label>
                         <input type="checkbox" id="run-sliding-window-checkbox">
@@ -259,7 +302,7 @@
                 </div>
 
                 <!-- Std Dev Controls -->
-                <div class="controls stddev-controls">
+                <div class="controls stddev-controls hide-in-dataset">
                     <div class="panel-header">
                         <label for="run-stddev-checkbox" class="panel-title">Std Dev</label>
                         <input type="checkbox" id="run-stddev-checkbox">
@@ -279,7 +322,7 @@
         </section>
 
         <!-- Generator Info -->
-        <section class="generator-info" id="generator-info">
+        <section class="generator-info hide-in-dataset" id="generator-info">
             <div class="generator-info-header">
                 <div class="generator-info-main">
                     <h3 id="generator-title">Constant</h3>
@@ -309,7 +352,7 @@
         </section>
 
         <!-- Chart Legend -->
-        <section class="chart-legend">
+        <section class="chart-legend hide-in-dataset">
             <div class="legend-item">
                 <span class="legend-line ground-truth"></span>
                 <span>Ground Truth</span>
@@ -329,7 +372,7 @@
         </section>
 
         <!-- Accuracy Metrics -->
-        <section class="accuracy-metrics" id="accuracy-metrics">
+        <section class="accuracy-metrics hide-in-dataset" id="accuracy-metrics">
             <h3>Detection Accuracy</h3>
             <table class="accuracy-table">
                 <thead>
@@ -375,7 +418,7 @@
         </section>
 
         <!-- Change Points Comparison Table -->
-        <section class="change-points-detail" id="change-points-detail">
+        <section class="change-points-detail hide-in-dataset" id="change-points-detail">
             <h3>Change Points Comparison</h3>
             <div class="comparison-tables">
                 <div class="table-wrapper">
@@ -412,6 +455,17 @@
             </div>
         </section>
 
+        <!-- Dataset Mode: per-algorithm detected change-point table -->
+        <section class="dataset-results hidden" id="dataset-results">
+            <h3>Detected change-point indices per algorithm</h3>
+            <table class="dataset-results-table">
+                <thead>
+                    <tr><th style="width:30%;">Algorithm</th><th style="width:8%;">Count</th><th>Indices</th></tr>
+                </thead>
+                <tbody id="dataset-results-body"></tbody>
+            </table>
+        </section>
+
         <!-- Multi-chart view for "Show All" -->
         <section class="multi-chart-container hidden" id="multi-chart-container">
             <h2>All Test Patterns - Otava Comparison</h2>
@@ -431,6 +485,6 @@
         </p>
     </footer>
 
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v={{ version }}"></script>
 </body>
 </html>

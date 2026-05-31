@@ -1843,3 +1843,175 @@ footer a:hover {
         grid-template-columns: 1fr;
     }
 }
+
+/* ============================================================
+   Dataset mode — load a bundled or pasted series and compare
+   Otava algorithm variants on the same data.
+   ============================================================ */
+
+.dataset-section {
+    background: #fafafa;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 0 0 20px;
+}
+
+.dataset-section.hidden {
+    display: none;
+}
+
+/* The mode toggle bar sits above the per-mode content. */
+.mode-toggle-section {
+    margin-bottom: 8px;
+}
+
+.dataset-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.dataset-label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    max-width: 480px;
+}
+
+.dataset-label select {
+    padding: 6px 8px;
+    font: inherit;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    background: #fff;
+}
+
+.dataset-description {
+    font-size: 13px;
+    color: #64748b;
+    margin: 0;
+    min-height: 1.4em;
+}
+
+.dataset-custom {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.dataset-custom.hidden {
+    display: none;
+}
+
+.dataset-custom textarea {
+    font-family: ui-monospace, "SF Mono", Monaco, monospace;
+    font-size: 13px;
+    padding: 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    resize: vertical;
+}
+
+.dataset-hint {
+    margin: 8px 0 0;
+    font-size: 13px;
+    color: #475569;
+}
+
+.dataset-status {
+    margin: 8px 0 0;
+    padding: 6px 10px;
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #1e1b4b;
+}
+
+.dataset-status--error {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #7f1d1d;
+}
+
+.otava-algo-row .algo-unavail {
+    margin-left: 4px;
+    color: #94a3b8;
+    font-style: italic;
+}
+
+.dataset-results.hidden {
+    display: none;
+}
+
+.dataset-results h3 {
+    margin: 16px 0 8px;
+}
+
+.dataset-results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.dataset-results-table th,
+.dataset-results-table td {
+    border: 1px solid #e2e8f0;
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+}
+
+.dataset-results-table th {
+    background: #f1f5f9;
+}
+
+.dataset-results-table .swatch {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+
+/* In dataset mode, hide synthetic-data and ground-truth UI. */
+body[data-mode="dataset"] .hide-in-dataset {
+    display: none !important;
+}
+
+/* Otava algorithm checkbox group (used in the Otava analysis panel). */
+.otava-algos {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 4px 0 12px;
+    font-size: 13px;
+}
+
+.otava-algo-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    line-height: 1.4;
+}
+
+.otava-algo-row input[type="checkbox"] {
+    flex-shrink: 0;
+}
+
+.otava-algo-row input[disabled] {
+    cursor: not-allowed;
+}
+
+.algo-hint {
+    color: #64748b;
+    font-size: 11px;
+}

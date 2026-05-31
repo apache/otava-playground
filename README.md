@@ -39,6 +39,16 @@ inv web-start
 
 Then open http://127.0.0.1:8100 in your browser.
 
+### Compare algorithms on a real dataset
+
+A third mode, **Dataset**, lets you load a bundled or pasted time series and
+see which change points each Otava algorithm variant
+(`compute_change_points`, `compute_change_points_orig`,
+`compute_change_points_deterministic`) detects on the same data. The TigerBeetle
+benchmark dataset ships as the default preset. The Otava analysis panel now
+exposes the same algorithm checkboxes in all three modes. See
+`docs/visualizer.md` for details.
+
 ## Installation
 
 ```bash

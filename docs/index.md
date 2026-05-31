@@ -105,6 +105,13 @@ otava-gen list
 otava-gen info step_function
 ```
 
+## Compare algorithms on a real dataset
+
+A third mode, **Dataset**, lets you load a bundled or pasted time series and
+see which change points each Otava algorithm variant detects on the same data.
+The TigerBeetle benchmark dataset ships as the default preset. See the
+[Web Visualizer](visualizer.md) doc for details.
+
 ## Contents
 
 ```{toctree}
