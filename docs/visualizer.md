@@ -355,3 +355,72 @@ The visualizer calculates these metrics when comparing Otava's results to ground
 ## Show All Graphs
 
 Click "Show All Graphs" to run analysis on all generators simultaneously. This produces a grid of charts showing how well the analysis methods perform across different types of change point patterns, allowing you to quickly compare detection accuracy across pattern types.
+
+## Dataset Mode — compare algorithms on a real series
+
+The mode toggle in the top section has three options: **Single Pattern**, **Mix
+Patterns**, and **Dataset**. Dataset mode replaces the synthetic generator grid
+with a dataset picker and a "Custom (paste below)" textarea so you can load a
+real time series and see where each Otava algorithm variant places change
+points on it.
+
+Ground-truth-only UI (accuracy metrics, comparison tables, chart legend) is
+hidden in Dataset mode because real data doesn't come with known change points.
+
+### Bundled datasets
+
+| Name | Length | Description |
+|------|--------|-------------|
+| `tigerbeetle` | 365 | Same series used by `apache/otava`'s `perf/perf_test.py`. Has a couple of distinctive ups and downs, an anomalous drop, then an upward slope, then normal variance. |
+
+Add more presets by dropping a file in `src/otava_test_data/datasets/` and
+registering it in `datasets/__init__.py::DATASETS`.
+
+### Algorithm checkboxes
+
+The Otava Analysis panel exposes a checkbox per algorithm variant in all three
+modes:
+
+| Key | Otava function | CLI flag |
+|-----|----------------|----------|
+| `split` | `compute_change_points` | (default) |
+| `orig` | `compute_change_points_orig` | `--orig-edivisive` |
+| `deterministic` | `compute_change_points_deterministic` | `--deterministic-edivisive` ([PR](https://github.com/apache/otava/pull/154)) |
+
+If `compute_change_points_deterministic` isn't importable in the installed
+otava version, the checkbox is disabled with a "(not in installed otava)"
+indicator next to it.
+
+### Custom data
+
+Pick "Custom (paste below)" from the source dropdown and paste a series as
+either a JSON array (`[1.2, 3.4, ...]`) or whitespace/comma-separated numbers.
+Non-numeric tokens are filtered out and the UI tells you how many were dropped.
+
+### HTTP endpoints
+
+- `GET /api/datasets` — bundled-preset metadata.
+- `GET /api/datasets/{name}` — one preset's series + metadata.
+- `GET /api/algorithms` — change-point algorithms exposed by the installed
+  otava version.
+- `POST /api/compare?window_len=...&max_pvalue=...&min_magnitude=...` —
+  run selected algorithms on a series. Body:
+  ```json
+  {"data": [1.2, 3.4, ...], "algorithms": ["split", "orig"]}
+  ```
+  Response:
+  ```json
+  {
+    "results": {
+      "split": {"indices": [15, 71, ...], "count": 8},
+      "orig":  {"indices": [15, 71, ...], "count": 5}
+    },
+    "parameters": {"window_len": 50, "max_pvalue": 0.001, "min_magnitude": 0.0}
+  }
+  ```
+  If `algorithms` is omitted, every available algorithm runs.
+
+The synthetic-pattern endpoints `/api/generate/{name}` and
+`/api/analyze/{name}` also accept an `otava_algorithm` query parameter
+(`split` | `orig` | `deterministic`) so synthetic-pattern flows can pick an
+algorithm variant too.

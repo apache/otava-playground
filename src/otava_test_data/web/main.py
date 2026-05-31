@@ -7,7 +7,7 @@ Or: otava-web
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from fastapi import FastAPI, Request, Query, Body
@@ -16,6 +16,10 @@ from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+
+# Algorithm name aliases — Literal type used both by query params and request bodies.
+AlgorithmName = Literal["split", "orig", "deterministic"]
+
 # Otava imports - optional dependency
 try:
     from otava.analysis import compute_change_points
@@ -23,6 +27,21 @@ try:
 except ImportError:
     OTAVA_AVAILABLE = False
     compute_change_points = None
+
+# Optional alternative algorithms — present on newer otava versions /
+# https://github.com/apache/otava/pull/154.
+# Feature-detected at import time so the /compare UI only offers what works.
+try:
+    from otava.analysis import compute_change_points_orig
+except ImportError:
+    compute_change_points_orig = None
+
+try:
+    from otava.analysis import compute_change_points_deterministic
+except ImportError:
+    compute_change_points_deterministic = None
+
+from otava_test_data.datasets import DATASETS, get_dataset, list_datasets
 
 from otava_test_data.generators.basic import (
     constant,
@@ -1190,15 +1209,17 @@ def run_otava_analysis(
     window_len: int = 30,
     max_pvalue: float = 0.05,
     min_magnitude: float = 0.0,
+    algorithm: str = "split",
 ) -> dict[str, Any]:
     """
-    Run Otava change point detection on data.
+    Run an Otava change point detection algorithm on data.
 
     Args:
-        data: Time series data as numpy array.
-        window_len: Minimum window length for detection.
+        data: Time series data.
+        window_len: Window length (only meaningful for `split`).
         max_pvalue: Maximum p-value threshold for significance.
         min_magnitude: Minimum magnitude of change to report.
+        algorithm: Which algorithm to run — 'split' (default), 'orig', or 'deterministic'.
 
     Returns:
         Dictionary with detected change points and metrics.
@@ -1211,36 +1232,60 @@ def run_otava_analysis(
             "count": 0,
         }
 
-    try:
-        result = compute_change_points(
-            data,
-            window_len=window_len,
-            max_pvalue=max_pvalue,
-            min_magnitude=min_magnitude,
-        )
+    if algorithm == "split":
+        fn, kwargs = compute_change_points, {
+            "window_len": window_len, "max_pvalue": max_pvalue,
+            "min_magnitude": min_magnitude,
+        }
+    elif algorithm == "orig":
+        fn, kwargs = compute_change_points_orig, {"max_pvalue": max_pvalue}
+    elif algorithm == "deterministic":
+        fn, kwargs = compute_change_points_deterministic, {
+            "max_pvalue": max_pvalue, "min_magnitude": min_magnitude,
+        }
+    else:
+        return {
+            "error": f"unknown algorithm: {algorithm}",
+            "detected_change_points": [], "detected_indices": [], "count": 0,
+        }
 
-        # Result is a tuple, first element is list of ChangePoint objects
+    if fn is None:
+        return {
+            "error": f"{algorithm} not available in installed otava version",
+            "detected_change_points": [], "detected_indices": [], "count": 0,
+        }
+
+    try:
+        # otava.analysis.compute_change_points crashes with an unmessaged ValueError
+        # on numpy arrays for some window/data combinations; a plain list of
+        # Python floats sidesteps it. Match the coercion done in /api/compare.
+        series = [float(v) for v in data]
+        result = fn(series, **kwargs)
         change_points_list = result[0] if isinstance(result, tuple) else result
 
         detected = []
         for cp in change_points_list:
-            detected.append({
-                "index": int(cp.index),  # Convert numpy.int64 to int
-                "mean_before": float(cp.stats.mean_1),
-                "mean_after": float(cp.stats.mean_2),
-                "std_before": float(cp.stats.std_1),
-                "std_after": float(cp.stats.std_2),
-                "pvalue": float(cp.stats.pvalue),
-            })
+            entry = {"index": int(cp.index)}
+            stats = getattr(cp, "stats", None)
+            if stats is not None:
+                for key in ("mean_1", "mean_2", "std_1", "std_2", "pvalue"):
+                    val = getattr(stats, key, None)
+                    if val is not None:
+                        out_key = {
+                            "mean_1": "mean_before", "mean_2": "mean_after",
+                            "std_1": "std_before",   "std_2": "std_after",
+                            "pvalue": "pvalue",
+                        }[key]
+                        entry[out_key] = float(val)
+            detected.append(entry)
 
         return {
             "detected_change_points": detected,
             "detected_indices": [cp["index"] for cp in detected],
             "count": len(detected),
             "parameters": {
-                "window_len": window_len,
-                "max_pvalue": max_pvalue,
-                "min_magnitude": min_magnitude,
+                "window_len": window_len, "max_pvalue": max_pvalue,
+                "min_magnitude": min_magnitude, "algorithm": algorithm,
             },
         }
 
@@ -1392,6 +1437,7 @@ def timeseries_to_dict(
             window_len=params.get("window_len", 30),
             max_pvalue=params.get("max_pvalue", 0.05),
             min_magnitude=params.get("min_magnitude", 0.0),
+            algorithm=params.get("algorithm", "split"),
         )
         result["otava"] = otava_result
 
@@ -1413,9 +1459,9 @@ def timeseries_to_dict(
 async def index(request: Request):
     """Main page with generator visualization."""
     return templates.TemplateResponse(
+        request,
         "index.html",
         {
-            "request": request,
             "generators": GENERATORS,
             "default_length": 200,
             "version": __version__,
@@ -1457,6 +1503,7 @@ async def generate_data(
     length: int = Query(default=200, ge=10, le=2000),
     seed: int = Query(default=42),
     run_otava: bool = Query(default=False, description="Run Otava analysis"),
+    otava_algorithm: AlgorithmName = Query(default="split", description="Otava algorithm to run"),  # noqa: B008
     window_len: int = Query(default=99999, ge=5, le=100000, description="Otava window length"),
     max_pvalue: float = Query(default=0.01, ge=0.0, le=1.0, description="Otava max p-value"),
     tolerance: int = Query(default=5, ge=0, le=50, description="Accuracy tolerance"),
@@ -1496,6 +1543,7 @@ async def generate_data(
             "window_len": window_len,
             "max_pvalue": max_pvalue,
             "tolerance": tolerance,
+            "algorithm": otava_algorithm,
         }
         return timeseries_to_dict(ts, include_otava=run_otava, otava_params=otava_params)
     except Exception as e:
@@ -1510,6 +1558,7 @@ async def analyze_with_otava(
     generator_name: str,
     length: int = Query(default=200, ge=10, le=2000),
     seed: int = Query(default=42),
+    otava_algorithm: AlgorithmName = Query(default="split", description="Otava algorithm to run"),  # noqa: B008
     window_len: int = Query(default=30, ge=5, le=100, description="Otava window length"),
     max_pvalue: float = Query(default=0.00001, ge=0.0, le=1.0, description="Otava max p-value"),
     min_magnitude: float = Query(default=0.0, ge=0, description="Minimum change magnitude"),
@@ -1550,6 +1599,7 @@ async def analyze_with_otava(
             "max_pvalue": max_pvalue,
             "min_magnitude": min_magnitude,
             "tolerance": tolerance,
+            "algorithm": otava_algorithm,
         }
         return timeseries_to_dict(ts, include_otava=True, otava_params=otava_params)
     except Exception as e:
@@ -1641,6 +1691,109 @@ async def detect_change_points(
             status_code=400,
             content={"error": str(e)},
         )
+
+
+# ----- Dataset comparison: presets and multi-algorithm detection -----
+
+ALGORITHMS = {
+    "split": {
+        "title": "split-edivisive (default)",
+        "description": (
+            "Hunter-style split-merge e-divisive + Welch t-test significance. "
+            "Otava default (compute_change_points)."
+        ),
+        "available": compute_change_points is not None,
+    },
+    "orig": {
+        "title": "orig-edivisive",
+        "description": (
+            "Original e-divisive with permutation significance test "
+            "(compute_change_points_orig, --orig-edivisive)."
+        ),
+        "available": compute_change_points_orig is not None,
+    },
+    "deterministic": {
+        "title": "deterministic-edivisive",
+        "description": (
+            "Original e-divisive with deterministic Welch t-test significance "
+            "(compute_change_points_deterministic, --deterministic-edivisive, "
+            "https://github.com/apache/otava/pull/154)."
+        ),
+        "available": compute_change_points_deterministic is not None,
+    },
+}
+
+
+def _run_algorithm(name: str, data, window_len: int, max_pvalue: float,
+                   min_magnitude: float) -> dict[str, Any]:
+    """Adapter from /api/compare's response shape to run_otava_analysis."""
+    res = run_otava_analysis(
+        data,
+        window_len=window_len,
+        max_pvalue=max_pvalue,
+        min_magnitude=min_magnitude,
+        algorithm=name,
+    )
+    out = {"indices": res.get("detected_indices", []), "count": res.get("count", 0)}
+    if res.get("error"):
+        out["error"] = res["error"]
+    return out
+
+
+class CompareRequest(BaseModel):
+    """Request body for /api/compare."""
+    data: list[float]
+    algorithms: list[AlgorithmName] | None = None  # default: all available
+
+
+@app.get("/api/datasets")
+async def get_datasets():
+    """List bundled real-world datasets."""
+    return {"datasets": list_datasets()}
+
+
+@app.get("/api/datasets/{name}")
+async def get_dataset_endpoint(name: str):
+    """Return one bundled dataset's series + metadata."""
+    ds = get_dataset(name)
+    if ds is None:
+        return JSONResponse(status_code=404, content={"error": f"unknown dataset: {name}"})
+    return ds
+
+
+@app.get("/api/algorithms")
+async def list_algorithms():
+    """List change-point algorithms exposed by the installed otava package."""
+    return {"algorithms": ALGORITHMS}
+
+
+@app.post("/api/compare")
+async def compare_algorithms(
+    request: CompareRequest,
+    window_len: int = Query(default=50, ge=5, le=100000),
+    max_pvalue: float = Query(default=0.001, ge=0.0, le=1.0),
+    min_magnitude: float = Query(default=0.0, ge=0),
+):
+    """Run multiple change-point algorithms on the same series and return all results."""
+    if not request.data:
+        return JSONResponse(status_code=400, content={"error": "No data provided"})
+    if not OTAVA_AVAILABLE:
+        return JSONResponse(status_code=503, content={"error": "apache-otava not installed"})
+
+    algorithms = request.algorithms or [n for n, a in ALGORITHMS.items() if a["available"]]
+    # run_otava_analysis handles float coercion internally.
+    results = {
+        name: _run_algorithm(name, request.data, window_len, max_pvalue, min_magnitude)
+        for name in algorithms
+    }
+    return {
+        "results": results,
+        "parameters": {
+            "window_len": window_len,
+            "max_pvalue": max_pvalue,
+            "min_magnitude": min_magnitude,
+        },
+    }
 
 
 def run():

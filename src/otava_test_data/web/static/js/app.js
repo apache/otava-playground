@@ -12,13 +12,32 @@ let generatorTileCharts = {};  // Mini charts for generator tiles
 let analysisMethods = {};  // Tutorial content for analysis methods
 let tutorialVisible = false;  // Track tutorial panel visibility
 
-// Mix Mode State
-let mixMode = false;              // Single Pattern vs Mix Patterns mode
+// Mode State - 'single' | 'mix' | 'dataset'
+let currentMode = 'single';
 let mixOperation = 'sum';         // 'sum' or 'append'
 let mixComponents = [];           // [{name, data, changePoints, params, count}]
 let mixedData = null;             // Combined data array
 let mixedChangePoints = [];       // Merged ground truth change points
 let tileBadges = {};              // Track count badges on tiles
+
+// Dataset Mode State
+let bundledDatasets = [];         // [{name, title, description}, ...]
+let availableAlgorithms = {};     // {split: {title, available}, ...}
+let datasetSeriesCache = {};      // name -> {series, timestamps?}
+
+// Helper that reads better at call sites than `currentMode === 'mix'`.
+const isMixMode = () => currentMode === 'mix';
+
+// Algorithm colors used when overlaying multiple algorithms on one chart.
+const ALGO_COLORS = {
+    split:         '#1f77b4',
+    orig:          '#d62728',
+    deterministic: '#2ca02c',
+};
+
+// In-flight AbortController for /api/compare so out-of-order responses can't
+// land after a newer one and desync the chart from the controls.
+let datasetInflight = null;
 
 // DOM Elements - Data Generation
 const generatorGrid = document.getElementById('generator-grid');
@@ -29,15 +48,26 @@ const lengthMax = document.getElementById('length-max');
 const seedInput = document.getElementById('seed-input');
 const dynamicParams = document.getElementById('dynamic-params');
 
-// DOM Elements - Mix Mode
+// DOM Elements - Mode toggle
 const modeSingleBtn = document.getElementById('mode-single-btn');
 const modeMixBtn = document.getElementById('mode-mix-btn');
+const modeDatasetBtn = document.getElementById('mode-dataset-btn');
 const mixInfo = document.getElementById('mix-info');
 const mixRecipe = document.getElementById('mix-recipe');
 const clearMixBtn = document.getElementById('clear-mix-btn');
 
+// DOM Elements - Dataset mode
+const datasetSection = document.getElementById('dataset-section');
+const datasetSourceSelect = document.getElementById('dataset-source');
+const datasetDescription = document.getElementById('dataset-description');
+const customInputWrapper = document.getElementById('custom-input-wrapper');
+const customInput = document.getElementById('custom-input');
+const datasetStatusEl = document.getElementById('dataset-status');
+const datasetResultsSection = document.getElementById('dataset-results');
+const datasetResultsBody = document.getElementById('dataset-results-body');
+
 // DOM Elements - Otava Controls
-const runOtavaCheckbox = document.getElementById('run-otava-checkbox');
+const otavaAlgoCheckboxes = document.querySelectorAll('.otava-algo-checkbox');
 const windowLenInput = document.getElementById('window-len-input');
 const maxPvalueInput = document.getElementById('max-pvalue-input');
 const yMinInput = document.getElementById('y-min-input');
@@ -78,6 +108,25 @@ const stdDevNumInput = document.getElementById('stddev-num-input');
 // Default match tolerance for comparing detected vs ground truth change points
 const DEFAULT_TOLERANCE = 0;  // Exact match for True Positive
 const CLOSE_MATCH_TOLERANCE = 5;  // Within 5 points for Close Match
+
+/** Return the set of Otava algorithms the user has enabled. */
+function getEnabledOtavaAlgorithms() {
+    return Array.from(otavaAlgoCheckboxes)
+        .filter(el => el.checked && !el.disabled)
+        .map(el => el.dataset.algo);
+}
+
+/** True if at least one Otava algorithm is enabled. */
+function isOtavaEnabled() {
+    return getEnabledOtavaAlgorithms().length > 0;
+}
+
+/** Primary algorithm — the first checked one (drives the chart annotations
+ *  + accuracy metrics in single/mix mode). Defaults to 'split'. */
+function primaryOtavaAlgorithm() {
+    const enabled = getEnabledOtavaAlgorithms();
+    return enabled[0] || 'split';
+}
 
 // DOM Elements - Actions
 const generateBtn = document.getElementById('generate-btn');
@@ -128,8 +177,16 @@ const metricsTutorialPanel = document.getElementById('metrics-tutorial-panel');
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
-    await Promise.all([loadGenerators(), loadAnalysisMethods()]);
+    document.body.setAttribute('data-mode', 'single');
+    await Promise.all([
+        loadGenerators(),
+        loadAnalysisMethods(),
+        loadDatasets(),
+        loadAvailableAlgorithms(),
+    ]);
     await populateGeneratorGrid();
+    populateDatasetUI();
+    refreshDatasetSourceDescription();
     setupEventListeners();
     setupTutorialHandlers();
     updateGeneratorInfo();
@@ -217,7 +274,7 @@ async function populateGeneratorGrid() {
 
     const generatorNames = Object.keys(generators);
 
-    if (mixMode) {
+    if (isMixMode()) {
         // Mix mode layout: Single row with clean patterns + noise + operation toggle
         const mixRow1Order = [
             'constant',
@@ -344,15 +401,15 @@ async function populateGeneratorGrid() {
     }
 
     // Apply mix mode class to grid
-    generatorGrid.classList.toggle('mix-mode', mixMode);
+    generatorGrid.classList.toggle('mix-mode', isMixMode());
 }
 
 /**
  * Create a generator tile element
  */
-function createGeneratorTile(name, info, preview, isMixMode) {
+function createGeneratorTile(name, info, preview, forMixGrid) {
     const tile = document.createElement('div');
-    tile.className = 'generator-tile' + (!isMixMode && name === selectedGenerator ? ' selected' : '');
+    tile.className = 'generator-tile' + (!forMixGrid && name === selectedGenerator ? ' selected' : '');
     tile.dataset.generator = name;
 
     // Preview container
@@ -371,7 +428,7 @@ function createGeneratorTile(name, info, preview, isMixMode) {
     tile.appendChild(label);
 
     // Click handler - different for mix mode vs single mode
-    if (isMixMode) {
+    if (forMixGrid) {
         tile.addEventListener('click', () => addToMix(name));
     } else {
         tile.addEventListener('click', () => selectGenerator(name));
@@ -379,7 +436,7 @@ function createGeneratorTile(name, info, preview, isMixMode) {
 
     // Create mini chart
     if (preview && preview.data) {
-        createTileChart(canvas, preview.data, !isMixMode && name === selectedGenerator);
+        createTileChart(canvas, preview.data, !forMixGrid && name === selectedGenerator);
     }
 
     return tile;
@@ -695,13 +752,23 @@ function setupEventListeners() {
     generateBtn.addEventListener('click', generateData);
     showAllBtn.addEventListener('click', showAllPatterns);
 
-    // Mix mode controls
-    modeSingleBtn.addEventListener('click', () => toggleMixMode(false));
-    modeMixBtn.addEventListener('click', () => toggleMixMode(true));
+    // Mode toggle
+    modeSingleBtn.addEventListener('click', () => setMode('single'));
+    modeMixBtn.addEventListener('click', () => setMode('mix'));
+    modeDatasetBtn.addEventListener('click', () => setMode('dataset'));
     clearMixBtn.addEventListener('click', clearMix);
 
+    // Dataset mode controls
+    datasetSourceSelect.addEventListener('change', () => {
+        refreshDatasetSourceDescription();
+        if (currentMode === 'dataset') runDatasetAnalysis();
+    });
+    customInput.addEventListener('change', () => {
+        if (currentMode === 'dataset') runDatasetAnalysis();
+    });
+
     // Otava controls
-    runOtavaCheckbox.addEventListener('change', refreshDisplay);
+    otavaAlgoCheckboxes.forEach(cb => cb.addEventListener('change', refreshDisplay));
     windowLenInput.addEventListener('change', refreshDisplay);
     maxPvalueInput.addEventListener('change', refreshDisplay);
 
@@ -740,7 +807,7 @@ function setupEventListeners() {
 
 // Update generator info display
 function updateGeneratorInfo() {
-    if (mixMode && mixComponents.length > 0) {
+    if (isMixMode() && mixComponents.length > 0) {
         // Mix mode with components
         const totalCPs = mixedChangePoints ? mixedChangePoints.filter(cp => cp.type !== 'outlier').length : 0;
         generatorTitle.textContent = 'Mixed Pattern';
@@ -783,7 +850,7 @@ function updateGeneratorInfo() {
 
 // Update dynamic parameter inputs
 function updateDynamicParams() {
-    if(mixMode) updateMixParams();
+    if(isMixMode()) updateMixParams();
     else updateSingleParams();
 }
 
@@ -822,7 +889,7 @@ function renderParamWidgets(info, containerDiv, bindComponent){
 
             function dynamicParamChanged(ev) {
                 // console.log(ev);
-                if(mixMode && bindComponent){
+                if(isMixMode() && bindComponent){
                     bindComponent.params[paramName] = ev.target.value;
                     asyncRedraw(bindComponent);
                 }
@@ -1164,13 +1231,14 @@ async function generateData() {
     const name = selectedGenerator;
     const length = lengthInput.value;
     const seed = seedInput.value;
-    const runOtava = runOtavaCheckbox.checked;
+    const runOtava = isOtavaEnabled();
 
     // Build query params
     const params = new URLSearchParams({
         length,
         seed,
         run_otava: runOtava,
+        otava_algorithm: primaryOtavaAlgorithm(),
         window_len: windowLenInput.value,
         max_pvalue: maxPvalueInput.value,
         tolerance: DEFAULT_TOLERANCE,
@@ -1409,7 +1477,7 @@ function updateChart(data) {
 
     // Track which is the last chart for showing X-axis
     const enabledMethods = [];
-    if (runOtavaCheckbox.checked) enabledMethods.push('otava');
+    if (isOtavaEnabled()) enabledMethods.push('otava');
     if (runMa) enabledMethods.push('ma');
     if (runBoundary) enabledMethods.push('boundary');
     if (runThreshold) enabledMethods.push('threshold');
@@ -1417,7 +1485,7 @@ function updateChart(data) {
     if (runStdDev) enabledMethods.push('stdDev');
 
     // Create Otava chart if enabled
-    if (runOtavaCheckbox.checked) {
+    if (isOtavaEnabled()) {
         const { tp: otavaTp, cm: otavaCm, fp: otavaFp, exactMatches: otavaExact, closeMatches: otavaClose } = otavaClassification;
         const canvas = createChartContainer('otava', 'Otava Analysis', '#2563eb', otavaTp, otavaCm, otavaFp);
         const ctx = canvas.getContext('2d');
@@ -1812,7 +1880,7 @@ function updateChart(data) {
 
     // Store all results for accuracy metrics display
     data._methodResults = {
-        otava: runOtavaCheckbox.checked ? {
+        otava: isOtavaEnabled() ? {
             name: 'Otava',
             classification: otavaClassification,
             detectedIndices: detectedIndices
@@ -2220,7 +2288,9 @@ async function showAllPatterns() {
  * Refresh the current display - calls the appropriate update function based on mode
  */
 function refreshDisplay() {
-    if (mixMode && mixComponents.length > 0) {
+    if (currentMode === 'dataset') {
+        runDatasetAnalysis();
+    } else if (currentMode === 'mix' && mixComponents.length > 0) {
         computeAndDisplayMixedData();
     } else {
         generateData();
@@ -2228,36 +2298,372 @@ function refreshDisplay() {
 }
 
 /**
- * Toggle between Single Pattern and Mix Patterns mode
+ * Switch between the three top-level modes: 'single' | 'mix' | 'dataset'.
  */
-function toggleMixMode(enable) {
-    mixMode = enable;
+function setMode(mode) {
+    if (!['single', 'mix', 'dataset'].includes(mode)) return;
+    currentMode = mode;
 
-    // Update button states
-    modeSingleBtn.classList.toggle('active', !enable);
-    modeMixBtn.classList.toggle('active', enable);
+    // Body data-attr drives CSS that hides ground-truth sections in dataset mode.
+    document.body.setAttribute('data-mode', mode);
 
-    // Toggle mix info visibility
-    mixInfo.classList.toggle('hidden', !enable);
+    // Update button active state
+    modeSingleBtn.classList.toggle('active', mode === 'single');
+    modeMixBtn.classList.toggle('active', mode === 'mix');
+    modeDatasetBtn.classList.toggle('active', mode === 'dataset');
 
-    // Toggle grid class
-    generatorGrid.classList.toggle('mix-mode', enable);
+    // Show/hide the right top section
+    const generatorSection = document.querySelector('.generator-grid-section');
+    if (generatorSection) generatorSection.classList.toggle('hidden', mode === 'dataset');
+    datasetSection.classList.toggle('hidden', mode !== 'dataset');
 
-    // Clear mix state when switching modes- or maybe not...
-    if (enable) {
-        //clearMix();
+    // Update the section heading next to the mode toggle.
+    const title = document.getElementById('mode-section-title');
+    if (title) {
+        title.textContent =
+            mode === 'dataset' ? 'Dataset' :
+            mode === 'mix'     ? 'Mix Patterns' :
+                                 'Select Pattern';
+    }
+
+    // Mix-info banner visible only in mix mode
+    mixInfo.classList.toggle('hidden', mode !== 'mix');
+    generatorGrid.classList.toggle('mix-mode', mode === 'mix');
+
+    if (mode === 'mix') {
         updateMixDisplay();
-    } else {
-        // Clear badges and restore normal tile behavior
+        populateGeneratorGrid();
+    } else if (mode === 'single') {
         clearMix();
-        // Re-render the selected generator in single mode
-        if (selectedGenerator) {
-            generateData();
+        populateGeneratorGrid();
+        if (selectedGenerator) generateData();
+    } else {
+        // Dataset mode: hide multi-chart and clear mix state silently.
+        multiChartContainer.classList.add('hidden');
+        runDatasetAnalysis();
+    }
+}
+
+/* ====================================================================
+   Dataset Mode
+   ==================================================================== */
+
+async function loadDatasets() {
+    try {
+        const r = await fetch('/api/datasets');
+        const body = await r.json();
+        bundledDatasets = body.datasets || [];
+    } catch (e) {
+        console.error('Failed to load datasets:', e);
+        bundledDatasets = [];
+    }
+}
+
+async function loadAvailableAlgorithms() {
+    try {
+        const r = await fetch('/api/algorithms');
+        const body = await r.json();
+        availableAlgorithms = body.algorithms || {};
+    } catch (e) {
+        console.error('Failed to load algorithms:', e);
+        availableAlgorithms = {};
+    }
+}
+
+function populateDatasetUI() {
+    // Dataset source dropdown.
+    datasetSourceSelect.innerHTML = '';
+    bundledDatasets.forEach(ds => {
+        const opt = document.createElement('option');
+        opt.value = ds.name;
+        opt.textContent = ds.title;
+        datasetSourceSelect.appendChild(opt);
+    });
+    const customOpt = document.createElement('option');
+    customOpt.value = '__custom__';
+    customOpt.textContent = 'Custom (paste below)';
+    datasetSourceSelect.appendChild(customOpt);
+
+    // Disable Otava-panel checkboxes for algorithms the installed otava doesn't expose.
+    for (const [name, info] of Object.entries(availableAlgorithms)) {
+        const cb = document.getElementById(`otava-algo-${name}`);
+        if (!cb) continue;
+        if (!info.available) {
+            cb.checked = false;
+            cb.disabled = true;
+            // Append a sibling indicator instead of overwriting the existing
+            // .algo-hint, which may contain an inline link (e.g. PR #154).
+            if (!cb.parentElement.querySelector('.algo-unavail')) {
+                const span = document.createElement('span');
+                span.className = 'algo-unavail';
+                span.textContent = '(not in installed otava)';
+                cb.parentElement.appendChild(span);
+            }
+        }
+    }
+}
+
+async function loadCurrentDatasetSeries() {
+    const choice = datasetSourceSelect.value;
+    if (choice === '__custom__') {
+        const { series, dropped } = parseCustomSeries(customInput.value);
+        return { name: 'custom', title: 'Custom', series, dropped };
+    }
+    if (!datasetSeriesCache[choice]) {
+        const r = await fetch(`/api/datasets/${encodeURIComponent(choice)}`);
+        if (!r.ok) throw new Error(`Failed to load ${choice}: ${r.status}`);
+        datasetSeriesCache[choice] = await r.json();
+    }
+    return datasetSeriesCache[choice];
+}
+
+function parseCustomSeries(text) {
+    text = (text || '').trim();
+    if (!text) return { series: [], dropped: 0 };
+    let raw;
+    if (text.startsWith('[')) {
+        try { raw = JSON.parse(text).map(Number); }
+        catch (e) { raw = text.split(/[^0-9eE.\-+]+/).filter(Boolean).map(Number); }
+    } else {
+        raw = text.split(/[^0-9eE.\-+]+/).filter(Boolean).map(Number);
+    }
+    const series = raw.filter(v => Number.isFinite(v));
+    return { series, dropped: raw.length - series.length };
+}
+
+function refreshDatasetSourceDescription() {
+    const choice = datasetSourceSelect.value;
+    if (choice === '__custom__') {
+        customInputWrapper.classList.remove('hidden');
+        datasetDescription.textContent = 'Paste your own numeric series.';
+        return;
+    }
+    customInputWrapper.classList.add('hidden');
+    const ds = bundledDatasets.find(d => d.name === choice);
+    datasetDescription.textContent = ds ? ds.description : '';
+}
+
+function setDatasetStatus(msg, isError = false) {
+    if (!msg) {
+        datasetStatusEl.hidden = true;
+        datasetStatusEl.textContent = '';
+        return;
+    }
+    datasetStatusEl.hidden = false;
+    datasetStatusEl.textContent = msg;
+    datasetStatusEl.classList.toggle('dataset-status--error', !!isError);
+}
+
+function emptyResultsRow(message) {
+    datasetResultsBody.replaceChildren();
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 3;
+    td.style.color = '#999';
+    td.textContent = message;
+    tr.appendChild(td);
+    datasetResultsBody.appendChild(tr);
+    datasetResultsSection.classList.remove('hidden');
+}
+
+async function runDatasetAnalysis() {
+    // Claim the in-flight slot up front so every early-return path leaves
+    // datasetInflight in a clean state and the next call's abort() is meaningful.
+    if (datasetInflight) datasetInflight.abort();
+    const ctrl = new AbortController();
+    datasetInflight = ctrl;
+    const stillCurrent = () => datasetInflight === ctrl;
+
+    let series;
+    let droppedTokens = 0;
+    try {
+        const ds = await loadCurrentDatasetSeries();
+        series = ds.series;
+        droppedTokens = ds.dropped || 0;
+    } catch (e) {
+        if (stillCurrent()) {
+            datasetInflight = null;
+            setDatasetStatus(`Failed to load series: ${e.message || e}`, true);
+        }
+        return;
+    }
+    if (!stillCurrent()) return;
+
+    const tooFewPoints = !series || series.length < 5;
+    const noAlgos = !tooFewPoints && getEnabledOtavaAlgorithms().length === 0;
+
+    // Compose the status: token-warning + (optional) terminal hint, so an
+    // input problem isn't masked by the "need 5 points" message and vice versa.
+    const parts = [];
+    if (droppedTokens > 0) parts.push(`Ignored ${droppedTokens} non-numeric token(s).`);
+    if (tooFewPoints) parts.push('Need at least 5 numeric points.');
+    setDatasetStatus(parts.join(' '), parts.length > 0);
+
+    if (tooFewPoints) {
+        emptyResultsRow('Need at least 5 numeric points.');
+        datasetInflight = null;
+        return;
+    }
+    if (noAlgos) {
+        renderDatasetChart(series, {});
+        emptyResultsRow('Pick at least one algorithm in the Otava Analysis panel.');
+        datasetInflight = null;
+        return;
+    }
+
+    const algos = getEnabledOtavaAlgorithms();
+    const params = new URLSearchParams({
+        window_len: windowLenInput.value,
+        max_pvalue: maxPvalueInput.value,
+        min_magnitude: '0',
+    });
+
+    try {
+        document.body.classList.add('loading');
+        const r = await fetch(`/api/compare?${params}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: series, algorithms: algos }),
+            signal: ctrl.signal,
+        });
+        if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.error || `HTTP ${r.status}`);
+        }
+        const body = await r.json();
+        if (!stillCurrent()) return;  // superseded; let the newer call render
+        renderDatasetChart(series, body.results);
+        renderDatasetResultsTable(body.results);
+        updateDatasetStats(series, body.results);
+        datasetResultsSection.classList.remove('hidden');
+    } catch (e) {
+        if (e.name === 'AbortError') return;  // expected when superseded
+        if (stillCurrent()) setDatasetStatus(`Compare failed: ${e.message || e}`, true);
+    } finally {
+        if (stillCurrent()) {
+            datasetInflight = null;
+            document.body.classList.remove('loading');
+        }
+    }
+}
+
+function renderDatasetChart(series, resultsByAlgo) {
+    stackedCharts.forEach(c => c.destroy());
+    stackedCharts = [];
+    stackedChartsContainer.innerHTML = '';
+
+    const container = document.createElement('div');
+    container.className = 'stacked-chart';
+    const canvas = document.createElement('canvas');
+    canvas.id = 'canvas-dataset';
+    container.appendChild(canvas);
+    stackedChartsContainer.appendChild(container);
+
+    const labels = series.map((_, i) => i);
+    const annotations = {};
+    for (const [algo, info] of Object.entries(resultsByAlgo || {})) {
+        const color = ALGO_COLORS[algo] || '#888';
+        for (const idx of (info.indices || [])) {
+            annotations[`${algo}-${idx}`] = {
+                type: 'line',
+                xMin: idx, xMax: idx,
+                borderColor: color,
+                borderWidth: 2,
+                borderDash: [4, 4],
+            };
         }
     }
 
-    // Rebuild grid for mix mode layout
-    populateGeneratorGrid();
+    const chart = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Series',
+                data: series,
+                borderColor: '#444',
+                backgroundColor: 'rgba(0,0,0,0)',
+                pointRadius: 1.5,
+                borderWidth: 1,
+                tension: 0,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { title: { display: true, text: 'Index' } },
+                y: { title: { display: true, text: 'Value' } },
+            },
+            plugins: {
+                legend: { position: 'top' },
+                annotation: { annotations },
+            },
+        },
+    });
+    stackedCharts.push(chart);
+}
+
+function renderDatasetResultsTable(resultsByAlgo) {
+    // Build rows as DOM nodes so server-supplied strings (algorithm names,
+    // error messages) can't break out and inject HTML.
+    datasetResultsBody.replaceChildren();
+    const entries = Object.entries(resultsByAlgo);
+    if (entries.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 3;
+        td.style.color = '#999';
+        td.textContent = 'No algorithms selected.';
+        tr.appendChild(td);
+        datasetResultsBody.appendChild(tr);
+        return;
+    }
+    for (const [algo, info] of entries) {
+        const color = ALGO_COLORS[algo] || '#888';
+        const indices = info.indices || [];
+        const tr = document.createElement('tr');
+
+        const tdName = document.createElement('td');
+        const swatch = document.createElement('span');
+        swatch.className = 'swatch';
+        swatch.style.background = color;
+        tdName.appendChild(swatch);
+        tdName.appendChild(document.createTextNode(algo));
+        if (info.error) {
+            const span = document.createElement('span');
+            span.style.color = '#900';
+            span.textContent = ` (${info.error})`;
+            tdName.appendChild(span);
+        }
+        tr.appendChild(tdName);
+
+        const tdCount = document.createElement('td');
+        tdCount.textContent = String(indices.length);
+        tr.appendChild(tdCount);
+
+        const tdIdx = document.createElement('td');
+        const code = document.createElement('code');
+        code.textContent = indices.length ? indices.join(', ') : '—';
+        tdIdx.appendChild(code);
+        tr.appendChild(tdIdx);
+
+        datasetResultsBody.appendChild(tr);
+    }
+}
+
+function updateDatasetStats(series, resultsByAlgo) {
+    const n = series.length;
+    const mean = series.reduce((a, b) => a + b, 0) / n;
+    const variance = series.reduce((a, v) => a + (v - mean) ** 2, 0) / n;
+    const std = Math.sqrt(variance);
+    statLength.textContent = n.toString();
+    statMean.textContent = mean.toFixed(2);
+    statStd.textContent = std.toFixed(2);
+    statCpTruth.textContent = '—';
+    const totalDetected = Object.values(resultsByAlgo || {})
+        .reduce((a, info) => a + (info.indices?.length || 0), 0);
+    statCpDetected.textContent = totalDetected.toString();
 }
 
 /**
@@ -2468,7 +2874,7 @@ function clearMix() {
     updateMixDisplay();
     updateTileBadges();
 
-    if (mixMode) {
+    if (isMixMode()) {
         // Clear charts
         stackedChartsContainer.innerHTML = `
             <div class="stacked-chart" style="text-align: center; padding: 2rem;">
@@ -2658,7 +3064,7 @@ async function computeAndDisplayMixedData() {
     };
 
     // Run Otava analysis on mixed data if enabled
-    if (runOtavaCheckbox.checked) {
+    if (isOtavaEnabled()) {
         try {
             const params = new URLSearchParams({
                 window_len: windowLenInput.value,
@@ -2773,7 +3179,7 @@ function updateTileBadges() {
         tile.classList.remove('in-mix');
     });
 
-    if (!mixMode) return;
+    if (!isMixMode()) return;
 
     // Add badges for components in mix
     const sumClicks = {};
