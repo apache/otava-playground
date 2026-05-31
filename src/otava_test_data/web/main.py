@@ -21,6 +21,10 @@ from fastapi.templating import Jinja2Templates
 AlgorithmName = Literal["split", "orig", "deterministic"]
 
 # Otava imports - optional dependency
+from otava.series import AnalysisOptions
+
+_OTAVA_DEFAULTS = AnalysisOptions()
+
 try:
     from otava.analysis import compute_change_points
     OTAVA_AVAILABLE = True
@@ -1206,9 +1210,9 @@ DETECTION_METRICS_TUTORIAL = {
 
 def run_otava_analysis(
     data: np.ndarray,
-    window_len: int = 30,
-    max_pvalue: float = 0.05,
-    min_magnitude: float = 0.0,
+    window_len: int = _OTAVA_DEFAULTS.window_len,
+    max_pvalue: float = _OTAVA_DEFAULTS.max_pvalue,
+    min_magnitude: float = _OTAVA_DEFAULTS.min_magnitude,
     algorithm: str = "split",
 ) -> dict[str, Any]:
     """
@@ -1434,9 +1438,9 @@ def timeseries_to_dict(
         params = otava_params or {}
         otava_result = run_otava_analysis(
             ts.data,
-            window_len=params.get("window_len", 30),
-            max_pvalue=params.get("max_pvalue", 0.05),
-            min_magnitude=params.get("min_magnitude", 0.0),
+            window_len=params.get("window_len", _OTAVA_DEFAULTS.window_len),
+            max_pvalue=params.get("max_pvalue", _OTAVA_DEFAULTS.max_pvalue),
+            min_magnitude=params.get("min_magnitude", _OTAVA_DEFAULTS.min_magnitude),
             algorithm=params.get("algorithm", "split"),
         )
         result["otava"] = otava_result
@@ -1465,6 +1469,11 @@ async def index(request: Request):
             "generators": GENERATORS,
             "default_length": 200,
             "version": __version__,
+            "otava_defaults": {
+                "window_len": _OTAVA_DEFAULTS.window_len,
+                "max_pvalue": _OTAVA_DEFAULTS.max_pvalue,
+                "min_magnitude": _OTAVA_DEFAULTS.min_magnitude,
+            },
         },
     )
 
@@ -1504,8 +1513,8 @@ async def generate_data(
     seed: int = Query(default=42),
     run_otava: bool = Query(default=False, description="Run Otava analysis"),
     otava_algorithm: AlgorithmName = Query(default="split", description="Otava algorithm to run"),  # noqa: B008
-    window_len: int = Query(default=99999, ge=5, le=100000, description="Otava window length"),
-    max_pvalue: float = Query(default=0.01, ge=0.0, le=1.0, description="Otava max p-value"),
+    window_len: int = Query(default=_OTAVA_DEFAULTS.window_len, ge=5, le=100000, description="Otava window length"),
+    max_pvalue: float = Query(default=_OTAVA_DEFAULTS.max_pvalue, ge=0.0, le=1.0, description="Otava max p-value"),
     tolerance: int = Query(default=5, ge=0, le=50, description="Accuracy tolerance"),
     # Dynamic params will be passed as query parameters
     request: Request = None,
@@ -1559,9 +1568,9 @@ async def analyze_with_otava(
     length: int = Query(default=200, ge=10, le=2000),
     seed: int = Query(default=42),
     otava_algorithm: AlgorithmName = Query(default="split", description="Otava algorithm to run"),  # noqa: B008
-    window_len: int = Query(default=30, ge=5, le=100, description="Otava window length"),
-    max_pvalue: float = Query(default=0.00001, ge=0.0, le=1.0, description="Otava max p-value"),
-    min_magnitude: float = Query(default=0.0, ge=0, description="Minimum change magnitude"),
+    window_len: int = Query(default=_OTAVA_DEFAULTS.window_len, ge=5, le=100, description="Otava window length"),
+    max_pvalue: float = Query(default=_OTAVA_DEFAULTS.max_pvalue, ge=0.0, le=1.0, description="Otava max p-value"),
+    min_magnitude: float = Query(default=_OTAVA_DEFAULTS.min_magnitude, ge=0, description="Minimum change magnitude"),
     tolerance: int = Query(default=5, ge=0, le=50, description="Accuracy tolerance"),
     request: Request = None,
 ):
@@ -1666,9 +1675,9 @@ class DetectRequest(BaseModel):
 @app.post("/api/detect")
 async def detect_change_points(
     request: DetectRequest,
-    window_len: int = Query(default=99999, ge=5, le=100000, description="Otava window length"),
-    max_pvalue: float = Query(default=0.01, ge=0.0, le=1.0, description="Otava max p-value"),
-    min_magnitude: float = Query(default=0.0, ge=0, description="Minimum change magnitude"),
+    window_len: int = Query(default=_OTAVA_DEFAULTS.window_len, ge=5, le=100000, description="Otava window length"),
+    max_pvalue: float = Query(default=_OTAVA_DEFAULTS.max_pvalue, ge=0.0, le=1.0, description="Otava max p-value"),
+    min_magnitude: float = Query(default=_OTAVA_DEFAULTS.min_magnitude, ge=0, description="Minimum change magnitude"),
 ):
     """Run Otava change point detection on arbitrary data."""
     if not request.data:
@@ -1770,9 +1779,9 @@ async def list_algorithms():
 @app.post("/api/compare")
 async def compare_algorithms(
     request: CompareRequest,
-    window_len: int = Query(default=50, ge=5, le=100000),
-    max_pvalue: float = Query(default=0.001, ge=0.0, le=1.0),
-    min_magnitude: float = Query(default=0.0, ge=0),
+    window_len: int = Query(default=_OTAVA_DEFAULTS.window_len, ge=5, le=100000),
+    max_pvalue: float = Query(default=_OTAVA_DEFAULTS.max_pvalue, ge=0.0, le=1.0),
+    min_magnitude: float = Query(default=_OTAVA_DEFAULTS.min_magnitude, ge=0),
 ):
     """Run multiple change-point algorithms on the same series and return all results."""
     if not request.data:
