@@ -2561,17 +2561,27 @@ function renderDatasetChart(series, resultsByAlgo) {
 
     const labels = series.map((_, i) => i);
     const annotations = {};
+    // Group detections by index so overlapping algos fan out instead of stacking.
+    const byIndex = new Map();
     for (const [algo, info] of Object.entries(resultsByAlgo || {})) {
-        const color = ALGO_COLORS[algo] || '#888';
         for (const idx of (info.indices || [])) {
+            if (!byIndex.has(idx)) byIndex.set(idx, []);
+            byIndex.get(idx).push(algo);
+        }
+    }
+    const fanStep = 0.4;
+    for (const [idx, algos] of byIndex) {
+        const n = algos.length;
+        algos.forEach((algo, i) => {
+            const x = n === 1 ? idx : idx + (i - (n - 1) / 2) * fanStep;
             annotations[`${algo}-${idx}`] = {
                 type: 'line',
-                xMin: idx, xMax: idx,
-                borderColor: color,
+                xMin: x, xMax: x,
+                borderColor: ALGO_COLORS[algo] || '#888',
                 borderWidth: 2,
                 borderDash: [4, 4],
             };
-        }
+        });
     }
 
     const chart = new Chart(canvas.getContext('2d'), {
