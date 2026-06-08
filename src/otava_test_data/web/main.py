@@ -1568,7 +1568,7 @@ async def analyze_with_otava(
     length: int = Query(default=200, ge=10, le=2000),
     seed: int = Query(default=42),
     otava_algorithm: AlgorithmName = Query(default="split", description="Otava algorithm to run"),  # noqa: B008
-    window_len: int = Query(default=_OTAVA_DEFAULTS.window_len, ge=5, le=100, description="Otava window length"),
+    window_len: int = Query(default=_OTAVA_DEFAULTS.window_len, ge=5, le=100000, description="Otava window length"),
     max_pvalue: float = Query(default=_OTAVA_DEFAULTS.max_pvalue, ge=0.0, le=1.0, description="Otava max p-value"),
     min_magnitude: float = Query(default=_OTAVA_DEFAULTS.min_magnitude, ge=0, description="Minimum change magnitude"),
     tolerance: int = Query(default=5, ge=0, le=50, description="Accuracy tolerance"),
@@ -1675,6 +1675,7 @@ class DetectRequest(BaseModel):
 @app.post("/api/detect")
 async def detect_change_points(
     request: DetectRequest,
+    otava_algorithm: AlgorithmName = Query(default="split", description="Otava algorithm to run"),  # noqa: B008
     window_len: int = Query(default=_OTAVA_DEFAULTS.window_len, ge=5, le=100000, description="Otava window length"),
     max_pvalue: float = Query(default=_OTAVA_DEFAULTS.max_pvalue, ge=0.0, le=1.0, description="Otava max p-value"),
     min_magnitude: float = Query(default=_OTAVA_DEFAULTS.min_magnitude, ge=0, description="Minimum change magnitude"),
@@ -1693,6 +1694,7 @@ async def detect_change_points(
             window_len=window_len,
             max_pvalue=max_pvalue,
             min_magnitude=min_magnitude,
+            algorithm=otava_algorithm,
         )
         return result
     except Exception as e:
@@ -1749,10 +1751,20 @@ def _run_algorithm(name: str, data, window_len: int, max_pvalue: float,
     return out
 
 
+class AlgorithmParams(BaseModel):
+    """Optional per-algorithm parameter overrides for /api/compare."""
+    window_len: int | None = None
+    max_pvalue: float | None = None
+    min_magnitude: float | None = None
+
+
 class CompareRequest(BaseModel):
     """Request body for /api/compare."""
     data: list[float]
     algorithms: list[AlgorithmName] | None = None  # default: all available
+    # Per-algorithm overrides; missing fields fall back to the request's query-string
+    # defaults (window_len / max_pvalue / min_magnitude).
+    algorithm_params: dict[AlgorithmName, AlgorithmParams] | None = None
 
 
 @app.get("/api/datasets")
@@ -1783,18 +1795,39 @@ async def compare_algorithms(
     max_pvalue: float = Query(default=_OTAVA_DEFAULTS.max_pvalue, ge=0.0, le=1.0),
     min_magnitude: float = Query(default=_OTAVA_DEFAULTS.min_magnitude, ge=0),
 ):
-    """Run multiple change-point algorithms on the same series and return all results."""
+    """Run multiple change-point algorithms on the same series and return all results.
+
+    Each algorithm can have its own parameter overrides via `algorithm_params`;
+    missing keys fall back to the query-string defaults.
+    """
     if not request.data:
         return JSONResponse(status_code=400, content={"error": "No data provided"})
     if not OTAVA_AVAILABLE:
         return JSONResponse(status_code=503, content={"error": "apache-otava not installed"})
 
     algorithms = request.algorithms or [n for n, a in ALGORITHMS.items() if a["available"]]
-    # run_otava_analysis handles float coercion internally.
-    results = {
-        name: _run_algorithm(name, request.data, window_len, max_pvalue, min_magnitude)
-        for name in algorithms
-    }
+    overrides = request.algorithm_params or {}
+
+    def params_for(name: str) -> dict[str, float]:
+        override = overrides.get(name)
+        if override is None:
+            return {"window_len": window_len, "max_pvalue": max_pvalue,
+                    "min_magnitude": min_magnitude}
+        return {
+            "window_len": override.window_len if override.window_len is not None else window_len,
+            "max_pvalue": override.max_pvalue if override.max_pvalue is not None else max_pvalue,
+            "min_magnitude": (
+                override.min_magnitude if override.min_magnitude is not None else min_magnitude
+            ),
+        }
+
+    results = {}
+    per_algo_params = {}
+    for name in algorithms:
+        p = params_for(name)
+        per_algo_params[name] = p
+        results[name] = _run_algorithm(name, request.data, **p)
+
     return {
         "results": results,
         "parameters": {
@@ -1802,6 +1835,7 @@ async def compare_algorithms(
             "max_pvalue": max_pvalue,
             "min_magnitude": min_magnitude,
         },
+        "algorithm_params": per_algo_params,
     }
 
 

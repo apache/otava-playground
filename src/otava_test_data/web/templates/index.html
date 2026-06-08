@@ -148,34 +148,59 @@
                     </div>
 
                     <div class="otava-algos" id="otava-algos">
-                        <label class="otava-algo-row">
-                            <input type="checkbox" class="otava-algo-checkbox"
-                                   data-algo="split" id="otava-algo-split" checked>
-                            split-edivisive <span class="algo-hint">(default)</span>
-                        </label>
-                        <label class="otava-algo-row">
-                            <input type="checkbox" class="otava-algo-checkbox"
-                                   data-algo="orig" id="otava-algo-orig">
-                            orig-edivisive <span class="algo-hint">(permutation test)</span>
-                        </label>
-                        <label class="otava-algo-row">
-                            <input type="checkbox" class="otava-algo-checkbox"
-                                   data-algo="deterministic" id="otava-algo-deterministic">
-                            deterministic-edivisive
-                            <span class="algo-hint">(<a href="https://github.com/apache/otava/pull/154" target="_blank">PR #154</a>)</span>
-                        </label>
-                    </div>
-
-                    <div class="panel-fields">
-                        <div class="control-group">
-                            <label for="window-len-input" class="param-label">Window Length</label>
-                            <input type="number" id="window-len-input" value="{{ otava_defaults.window_len }}" min="5" max="100000" step="5">
+                        <div class="otava-algo" data-algo="split">
+                            <label class="otava-algo-row">
+                                <input type="checkbox" class="otava-algo-checkbox"
+                                       data-algo="split" id="otava-algo-split" checked>
+                                split-edivisive <span class="algo-hint">(default)</span>
+                            </label>
+                            <div class="algo-params">
+                                <div class="control-group">
+                                    <label for="window-len-split" class="param-label">Window Length</label>
+                                    <input type="number" id="window-len-split" data-algo-param="window_len" data-algo="split" value="{{ otava_defaults.window_len }}" min="5" max="100000" step="5">
+                                </div>
+                                <div class="control-group">
+                                    <div class="input-with-help">
+                                        <label for="max-pvalue-split" class="param-label">Max P-Value</label>
+                                        <input type="number" id="max-pvalue-split" class="max-pvalue-input" data-algo-param="max_pvalue" data-algo="split" value="{{ otava_defaults.max_pvalue }}" min="0" max="1" step="0.001">
+                                        <button type="button" class="param-help-btn" data-tooltip="Significance threshold for detecting changes. Lower values mean stricter detection (fewer false positives but may miss subtle changes). 0.05 is standard; use 0.00001 for very high confidence.">?</button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="control-group">
-                            <div class="input-with-help">
-                                <label for="max-pvalue-input" class="param-label">Max P-Value</label>
-                                <input type="number" id="max-pvalue-input" value="{{ otava_defaults.max_pvalue }}" step="0.001">
-                                <button type="button" class="param-help-btn" data-tooltip="Significance threshold for detecting changes. Lower values mean stricter detection (fewer false positives but may miss subtle changes). 0.05 is standard; use 0.00001 for very high confidence.">?</button>
+
+                        <div class="otava-algo" data-algo="orig">
+                            <label class="otava-algo-row">
+                                <input type="checkbox" class="otava-algo-checkbox"
+                                       data-algo="orig" id="otava-algo-orig">
+                                orig-edivisive <span class="algo-hint">(permutation test)</span>
+                            </label>
+                            <div class="algo-params">
+                                <div class="control-group">
+                                    <div class="input-with-help">
+                                        <label for="max-pvalue-orig" class="param-label">Max P-Value</label>
+                                        <input type="number" id="max-pvalue-orig" class="max-pvalue-input" data-algo-param="max_pvalue" data-algo="orig" value="{{ otava_defaults.max_pvalue }}" min="0" max="1" step="0.001">
+                                        <button type="button" class="param-help-btn" data-tooltip="Significance threshold for detecting changes. Lower values mean stricter detection (fewer false positives but may miss subtle changes). 0.05 is standard; use 0.00001 for very high confidence.">?</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="otava-algo" data-algo="deterministic">
+                            <label class="otava-algo-row">
+                                <input type="checkbox" class="otava-algo-checkbox"
+                                       data-algo="deterministic" id="otava-algo-deterministic">
+                                deterministic-edivisive
+                                <span class="algo-hint">(<a href="https://github.com/apache/otava/pull/154" target="_blank">PR #154</a>)</span>
+                            </label>
+                            <div class="algo-params">
+                                <div class="control-group">
+                                    <div class="input-with-help">
+                                        <label for="max-pvalue-deterministic" class="param-label">Max P-Value</label>
+                                        <input type="number" id="max-pvalue-deterministic" class="max-pvalue-input" data-algo-param="max_pvalue" data-algo="deterministic" value="{{ otava_defaults.max_pvalue }}" min="0" max="1" step="0.001">
+                                        <button type="button" class="param-help-btn" data-tooltip="Significance threshold for detecting changes. Lower values mean stricter detection (fewer false positives but may miss subtle changes). 0.05 is standard; use 0.00001 for very high confidence.">?</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

@@ -159,3 +159,53 @@ def test_analyze_accepts_otava_algorithm():
     assert "otava" in body
     assert "error" not in body["otava"]
     assert body["otava"]["parameters"]["algorithm"] == "orig"
+
+
+def test_compare_applies_per_algorithm_params():
+    """`algorithm_params` should override the query-string defaults per algorithm,
+    and missing per-algorithm keys should fall back to those defaults."""
+    series = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
+    r = client.post(
+        "/api/compare?max_pvalue=0.5&window_len=40",
+        json={
+            "data": series,
+            "algorithms": ["split", "orig"],
+            "algorithm_params": {
+                "split": {"window_len": 20, "max_pvalue": 0.001},
+                "orig":  {"max_pvalue": 0.01},
+            },
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    # The endpoint echoes back the resolved per-algorithm params so the UI can
+    # display "what was actually run."
+    assert body["algorithm_params"]["split"] == {
+        "window_len": 20, "max_pvalue": 0.001, "min_magnitude": 0.0,
+    }
+    # `orig` only overrode max_pvalue; window_len falls back to the query default.
+    assert body["algorithm_params"]["orig"] == {
+        "window_len": 40, "max_pvalue": 0.01, "min_magnitude": 0.0,
+    }
+
+
+def test_compare_without_per_algorithm_params_uses_query_defaults():
+    """`algorithm_params` is optional — falling back to query defaults must still work."""
+    series = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
+    r = client.post(
+        "/api/compare?max_pvalue=0.05",
+        json={"data": series, "algorithms": ["split"]},
+    )
+    assert r.status_code == 200
+    assert r.json()["algorithm_params"]["split"]["max_pvalue"] == 0.05
+
+
+def test_detect_accepts_otava_algorithm():
+    """`/api/detect` (used by mix mode) should respect the chosen algorithm."""
+    series = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
+    r = client.post(
+        "/api/detect?otava_algorithm=orig&max_pvalue=0.05",
+        json={"data": series},
+    )
+    assert r.status_code == 200
+    assert r.json()["parameters"]["algorithm"] == "orig"
