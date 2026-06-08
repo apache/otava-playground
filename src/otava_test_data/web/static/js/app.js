@@ -68,8 +68,7 @@ const datasetResultsBody = document.getElementById('dataset-results-body');
 
 // DOM Elements - Otava Controls
 const otavaAlgoCheckboxes = document.querySelectorAll('.otava-algo-checkbox');
-const windowLenInput = document.getElementById('window-len-input');
-const maxPvalueInput = document.getElementById('max-pvalue-input');
+const otavaAlgoParamInputs = document.querySelectorAll('.otava-algos [data-algo-param]');
 const yMinInput = document.getElementById('y-min-input');
 const yMaxInput = document.getElementById('y-max-input');
 const yMinSlider = document.getElementById('y-min-slider');
@@ -126,6 +125,30 @@ function isOtavaEnabled() {
 function primaryOtavaAlgorithm() {
     const enabled = getEnabledOtavaAlgorithms();
     return enabled[0] || 'split';
+}
+
+/** Read the per-algorithm parameter inputs and return a flat dict suitable
+ *  for query-string serialization (e.g. {window_len, max_pvalue}). Window
+ *  length only exists for 'split'; missing inputs are simply absent.
+ *
+ *  Reads the input values regardless of whether the algorithm's checkbox is
+ *  checked — callers (e.g. generateData with the primary algo) may need the
+ *  params even when the algo isn't "enabled" in the multi-select sense. */
+function getOtavaParamsForAlgo(algoName) {
+    const params = {};
+    document
+        .querySelectorAll(`.otava-algo[data-algo="${algoName}"] [data-algo-param]`)
+        .forEach(input => { params[input.dataset.algoParam] = input.value; });
+    return params;
+}
+
+/** Per-algorithm params for every enabled algorithm — used by /api/compare. */
+function getOtavaParamsByAlgo() {
+    const out = {};
+    for (const name of getEnabledOtavaAlgorithms()) {
+        out[name] = getOtavaParamsForAlgo(name);
+    }
+    return out;
 }
 
 // DOM Elements - Actions
@@ -769,8 +792,7 @@ function setupEventListeners() {
 
     // Otava controls
     otavaAlgoCheckboxes.forEach(cb => cb.addEventListener('change', refreshDisplay));
-    windowLenInput.addEventListener('change', refreshDisplay);
-    maxPvalueInput.addEventListener('change', refreshDisplay);
+    otavaAlgoParamInputs.forEach(input => input.addEventListener('change', refreshDisplay));
 
     // Y-Axis Min slider with bounds
     setupSliderWithBounds(yMinSlider, yMinInput, yMinBoundMin, yMinBoundMax, refreshDisplay);
@@ -1233,15 +1255,18 @@ async function generateData() {
     const seed = seedInput.value;
     const runOtava = isOtavaEnabled();
 
-    // Build query params
+    // Single-pattern mode only renders the primary algorithm's detections;
+    // the backend reads only that algorithm's params, so send just those.
+    const algo = primaryOtavaAlgorithm();
+    const algoParams = getOtavaParamsForAlgo(algo);
+
     const params = new URLSearchParams({
         length,
         seed,
         run_otava: runOtava,
-        otava_algorithm: primaryOtavaAlgorithm(),
-        window_len: windowLenInput.value,
-        max_pvalue: maxPvalueInput.value,
+        otava_algorithm: algo,
         tolerance: DEFAULT_TOLERANCE,
+        ...algoParams,
     });
 
     // Add dynamic params
@@ -2055,9 +2080,10 @@ function updateComparisonTables(data) {
 async function showAllPatterns() {
     const length = lengthInput.value;
     const seed = seedInput.value;
-    const windowLen = windowLenInput.value;
-    const maxPvalue = maxPvalueInput.value;
     const tolerance = DEFAULT_TOLERANCE;
+    // /api/analyze runs a single algorithm; "Show All" pins it to the primary.
+    const algo = primaryOtavaAlgorithm();
+    const algoParams = getOtavaParamsForAlgo(algo);
 
     try {
         document.body.classList.add('loading');
@@ -2071,9 +2097,9 @@ async function showAllPatterns() {
             const params = new URLSearchParams({
                 length,
                 seed,
-                window_len: windowLen,
-                max_pvalue: maxPvalue,
                 tolerance,
+                otava_algorithm: algo,
+                ...algoParams,
             });
 
             const response = await fetch(`/api/analyze/${name}?${params}`);
@@ -2512,18 +2538,18 @@ async function runDatasetAnalysis() {
     }
 
     const algos = getEnabledOtavaAlgorithms();
-    const params = new URLSearchParams({
-        window_len: windowLenInput.value,
-        max_pvalue: maxPvalueInput.value,
-        min_magnitude: '0',
-    });
+    const algoParams = getOtavaParamsByAlgo();
 
     try {
         document.body.classList.add('loading');
-        const r = await fetch(`/api/compare?${params}`, {
+        const r = await fetch(`/api/compare`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ data: series, algorithms: algos }),
+            body: JSON.stringify({
+                data: series,
+                algorithms: algos,
+                algorithm_params: algoParams,
+            }),
             signal: ctrl.signal,
         });
         if (!r.ok) {
@@ -3076,9 +3102,11 @@ async function computeAndDisplayMixedData() {
     // Run Otava analysis on mixed data if enabled
     if (isOtavaEnabled()) {
         try {
+            // The mix chart renders a single Otava result; pick the primary algo.
+            const algo = primaryOtavaAlgorithm();
             const params = new URLSearchParams({
-                window_len: windowLenInput.value,
-                max_pvalue: maxPvalueInput.value,
+                otava_algorithm: algo,
+                ...getOtavaParamsForAlgo(algo),
             });
             const response = await fetch(`/api/detect?${params}`, {
                 method: 'POST',
