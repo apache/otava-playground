@@ -2079,3 +2079,53 @@ body[data-mode="dataset"] .hide-in-dataset {
 .otava-algo:has(.otava-algo-checkbox:not(:checked)) .algo-params {
     opacity: 0.45;
 }
+
+/* ── Per-algorithm Otava visualization ───────────────────────────── */
+
+/* Status text colors used inside detected-table per-algo cells. */
+.pvalue-tp { color: #10b981; font-weight: 600; }
+.pvalue-cm { color: #f59e0b; font-weight: 600; }
+.pvalue-fp { color: #ef4444; font-weight: 600; }
+.pvalue-empty { color: #cbd5e1; }
+
+/* Dots used in the ground-truth "Matched by" column and the stat card. */
+.algo-dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    vertical-align: middle;
+    margin-right: 4px;
+}
+.algo-dot-split         { background: #1f77b4; }
+.algo-dot-orig          { background: #d62728; }
+.algo-dot-deterministic { background: #2ca02c; }
+
+/* Per-algorithm segments inside the "Otava Detected" stat card. */
+.otava-stat-segments {
+    display: inline-flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+}
+.otava-stat-segment {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    line-height: 1;
+}
+.otava-stat-label { color: #64748b; font-size: 0.75rem; }
+
+/* Matched-by column inner layout — one dot+text per algo, dot-separated. */
+.matched-by-list {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0 8px;
+}
+.matched-by-list .matched-entry::after {
+    content: "·";
+    margin-left: 8px;
+    color: #cbd5e1;
+}
+.matched-by-list .matched-entry:last-child::after { content: ""; }
+.matched-entry-miss { color: #cbd5e1; }

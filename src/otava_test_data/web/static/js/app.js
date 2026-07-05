@@ -51,6 +51,17 @@ const ALGO_COLORS = {
     deterministic: '#2ca02c',
 };
 
+// Short human-readable labels for compact UI surfaces (stat card, dot lists).
+const ALGO_LABELS = {
+    split:         'split',
+    orig:          'orig',
+    deterministic: 'det',
+};
+
+// Canonical order — drives stat-card layout, accuracy rows, detected columns,
+// and matched-by dots. Iteration order of `ALGO_COLORS` is not guaranteed by spec.
+const ALGO_ORDER = ['split', 'orig', 'deterministic'];
+
 // In-flight AbortController for /api/compare so out-of-order responses can't
 // land after a newer one and desync the chart from the controls.
 let datasetInflight = null;
@@ -163,6 +174,38 @@ function getOtavaParamsByAlgo() {
     const out = {};
     for (const name of getEnabledOtavaAlgorithms()) {
         out[name] = getOtavaParamsForAlgo(name);
+    }
+    return out;
+}
+
+/** Call /api/compare with the currently-enabled algorithms and their params.
+ *  Returns Promise<Map<algoName, {indices, count, change_points, error?}>>
+ *  for the algorithms that were actually requested. Order in the returned
+ *  Map follows ALGO_ORDER. */
+async function runOtavaForEnabled(series, { signal } = {}) {
+    const algos = getEnabledOtavaAlgorithms();
+    if (algos.length === 0) return new Map();
+
+    const r = await fetch('/api/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            data: series,
+            algorithms: algos,
+            algorithm_params: getOtavaParamsByAlgo(),
+        }),
+        signal,
+    });
+    if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${r.status}`);
+    }
+    const body = await r.json();
+    const out = new Map();
+    for (const name of ALGO_ORDER) {
+        if (body.results && Object.prototype.hasOwnProperty.call(body.results, name)) {
+            out.set(name, body.results[name]);
+        }
     }
     return out;
 }
