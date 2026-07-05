@@ -1342,23 +1342,8 @@ async function generateData() {
                 console.error('Otava compare failed:', e);
                 data.otavaMulti = new Map();
             }
-            // Temporary back-compat: legacy single-otava consumers still read
-            // data.otava. Mirror the primary algo so the current chart, accuracy
-            // table, and detected table keep rendering until they migrate.
-            const primary = primaryOtavaAlgorithm();
-            const primaryRes = data.otavaMulti.get(primary);
-            if (primaryRes) {
-                data.otava = {
-                    detected_change_points: primaryRes.change_points || [],
-                    detected_indices: primaryRes.indices || [],
-                    count: primaryRes.count || 0,
-                };
-            } else {
-                data.otava = { detected_change_points: [], detected_indices: [], count: 0 };
-            }
         } else {
             data.otavaMulti = new Map();
-            data.otava = { detected_change_points: [], detected_indices: [], count: 0 };
         }
 
         updateChart(data);
@@ -1465,17 +1450,12 @@ function updateChart(data) {
     const groundTruthIndices = allChangePoints
         .filter(cp => cp.type !== 'outlier')
         .map(cp => cp.index);
-    const detectedIndices = data.otava?.detected_indices || [];
-
     // Run MA detection if enabled
     const runMa = runMaCheckbox.checked;
     const maWindow = parseInt(maWindowInput.value);
     const maThreshold = parseFloat(maThresholdInput.value);
     const maResult = runMa ? detectChangePointsMA(values, maWindow, maThreshold) : { indices: [], details: [] };
     const maDetectedIndices = maResult.indices;
-
-    // Classify Otava detections
-    const otavaClassification = classifyDetections(detectedIndices, groundTruthIndices);
 
     // Classify MA detections
     const maClassification = classifyDetections(maDetectedIndices, groundTruthIndices);
@@ -3334,36 +3314,23 @@ async function computeAndDisplayMixedData() {
             change_points: mixedChangePoints,
             count: mixedChangePoints.filter(cp => cp.type !== 'outlier').length
         },
-        otava: null,  // Will be computed by updateChart if checkbox is enabled
     };
 
-    // Run Otava analysis on mixed data if enabled
     if (isOtavaEnabled()) {
         try {
-            // The mix chart renders a single Otava result; pick the primary algo.
-            const algo = primaryOtavaAlgorithm();
-            const params = new URLSearchParams({
-                otava_algorithm: algo,
-                ...getOtavaParamsForAlgo(algo),
-            });
-            const response = await fetch(`/api/detect?${params}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ data: mixedData })
-            });
-            const otavaResult = await response.json();
-            if (!otavaResult.error) {
-                fakeData.otava = otavaResult;
-            }
+            fakeData.otavaMulti = await runOtavaForEnabled(mixedData);
         } catch (error) {
             console.error('Failed to run Otava on mixed data:', error);
+            fakeData.otavaMulti = new Map();
         }
+    } else {
+        fakeData.otavaMulti = new Map();
     }
 
     updateChart(fakeData);
     updateStats(fakeData);
     updateAccuracyMetrics(fakeData);
-    updateMixComparisonTables(fakeData);
+    updateComparisonTables(fakeData);
     updateGeneratorInfo();
 
     // Show chart sections
@@ -3373,54 +3340,6 @@ async function computeAndDisplayMixedData() {
     accuracyMetrics.classList.remove('hidden');
     cpDetail.classList.remove('hidden');
     multiChartContainer.classList.add('hidden');
-}
-
-/**
- * Update comparison tables for mix mode
- */
-function updateMixComparisonTables(data) {
-    truthTableBody.innerHTML = '';
-    detectedTableBody.innerHTML = '';
-
-    const groundTruth = data.ground_truth?.change_points || [];
-    const detected = data.otava?.detected_change_points || [];
-
-    // Ground truth table
-    if (groundTruth.length === 0) {
-        const row = document.createElement('tr');
-        row.innerHTML = '<td colspan="4" class="empty-message">No ground truth change points</td>';
-        truthTableBody.appendChild(row);
-    } else {
-        groundTruth.forEach(cp => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td><strong>${cp.index}</strong></td>
-                <td>${cp.type}</td>
-                <td>${cp.description || '-'}</td>
-                <td>-</td>
-            `;
-            truthTableBody.appendChild(row);
-        });
-    }
-
-    // Detected table
-    if (!detected || detected.length === 0) {
-        const row = document.createElement('tr');
-        row.innerHTML = '<td colspan="5" class="empty-message">No change points detected by Otava</td>';
-        detectedTableBody.appendChild(row);
-    } else {
-        detected.forEach(cp => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td><strong>${cp.index}</strong></td>
-                <td>${cp.mean_before?.toFixed(2) || '-'}</td>
-                <td>${cp.mean_after?.toFixed(2) || '-'}</td>
-                <td>${cp.pvalue?.toExponential(2) || '-'}</td>
-                <td>-</td>
-            `;
-            detectedTableBody.appendChild(row);
-        });
-    }
 }
 
 /**
