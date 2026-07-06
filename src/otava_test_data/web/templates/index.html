@@ -221,6 +221,8 @@
                         </div>
                     </div>
 
+                    <div id="otava-error-notice" class="otava-error-notice hidden"></div>
+
                     <!-- Method tutorial (hidden by default) -->
                     <div class="method-tutorial hidden" id="otava-tutorial">
                         <p class="method-explanation"></p>
@@ -470,7 +472,7 @@
                                 <th>Index</th>
                                 <th>Type</th>
                                 <th>Description</th>
-                                <th>Matched?</th>
+                                <th class="matched-col-header">Matched by</th>
                             </tr>
                         </thead>
                         <tbody id="truth-table-body">
@@ -481,12 +483,11 @@
                     <h4>Otava Detected</h4>
                     <table id="detected-table">
                         <thead>
-                            <tr>
+                            <tr id="detected-table-head-row">
                                 <th>Index</th>
                                 <th>Mean Before</th>
                                 <th>Mean After</th>
-                                <th>P-Value</th>
-                                <th>Status</th>
+                                <!-- Per-algorithm columns appended by JS -->
                             </tr>
                         </thead>
                         <tbody id="detected-table-body">

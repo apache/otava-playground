@@ -51,6 +51,17 @@ const ALGO_COLORS = {
     deterministic: '#2ca02c',
 };
 
+// Short human-readable labels for compact UI surfaces (stat card, dot lists).
+const ALGO_LABELS = {
+    split:         'split',
+    orig:          'orig',
+    deterministic: 'det',
+};
+
+// Canonical order — drives stat-card layout, accuracy rows, detected columns,
+// and matched-by dots. Iteration order of `ALGO_COLORS` is not guaranteed by spec.
+const ALGO_ORDER = ['split', 'orig', 'deterministic'];
+
 // In-flight AbortController for /api/compare so out-of-order responses can't
 // land after a newer one and desync the chart from the controls.
 let datasetInflight = null;
@@ -163,6 +174,38 @@ function getOtavaParamsByAlgo() {
     const out = {};
     for (const name of getEnabledOtavaAlgorithms()) {
         out[name] = getOtavaParamsForAlgo(name);
+    }
+    return out;
+}
+
+/** Call /api/compare with the currently-enabled algorithms and their params.
+ *  Returns Promise<Map<algoName, {indices, count, change_points, error?}>>
+ *  for the algorithms that were actually requested. Order in the returned
+ *  Map follows ALGO_ORDER. */
+async function runOtavaForEnabled(series, { signal } = {}) {
+    const algos = getEnabledOtavaAlgorithms();
+    if (algos.length === 0) return new Map();
+
+    const r = await fetch('/api/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            data: series,
+            algorithms: algos,
+            algorithm_params: getOtavaParamsByAlgo(),
+        }),
+        signal,
+    });
+    if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${r.status}`);
+    }
+    const body = await r.json();
+    const out = new Map();
+    for (const name of ALGO_ORDER) {
+        if (body.results && Object.prototype.hasOwnProperty.call(body.results, name)) {
+            out.set(name, body.results[name]);
+        }
     }
     return out;
 }
@@ -1269,38 +1312,38 @@ async function generateData() {
     const name = selectedGenerator;
     const length = lengthInput.value;
     const seed = seedInput.value;
-    const runOtava = isOtavaEnabled();
+    const otavaEnabled = isOtavaEnabled();
 
-    // Single-pattern mode only renders the primary algorithm's detections;
-    // the backend reads only that algorithm's params, so send just those.
-    const algo = primaryOtavaAlgorithm();
-    const algoParams = getOtavaParamsForAlgo(algo);
-
-    const params = new URLSearchParams({
-        length,
-        seed,
-        run_otava: runOtava,
-        otava_algorithm: algo,
+    // /api/generate now only returns series + ground truth; detections come
+    // from /api/compare so we can show per-algorithm results.
+    const genParams = new URLSearchParams({
+        length, seed,
+        run_otava: 'false',
         tolerance: DEFAULT_TOLERANCE,
-        ...algoParams,
     });
 
-    // Add dynamic params
     const paramInputs = dynamicParams.querySelectorAll('input');
-    paramInputs.forEach(input => {
-        params.append(input.name, input.value);
-    });
+    paramInputs.forEach(input => { genParams.append(input.name, input.value); });
 
     try {
         document.body.classList.add('loading');
 
-        const response = await fetch(`/api/generate/${name}?${params}`);
+        const response = await fetch(`/api/generate/${name}?${genParams}`);
         const data = await response.json();
-        console.debug(data);
-
         if (data.error) {
             alert(`Error: ${data.error}`);
             return;
+        }
+
+        if (otavaEnabled) {
+            try {
+                data.otavaMulti = await runOtavaForEnabled(data.data);
+            } catch (e) {
+                console.error('Otava compare failed:', e);
+                data.otavaMulti = new Map();
+            }
+        } else {
+            data.otavaMulti = new Map();
         }
 
         updateChart(data);
@@ -1308,14 +1351,12 @@ async function generateData() {
         updateAccuracyMetrics(data);
         updateComparisonTables(data);
 
-        // Hide multi-chart view when generating single
         multiChartContainer.classList.add('hidden');
         document.querySelector('.stacked-charts-container').classList.remove('hidden');
         document.querySelector('.chart-legend').classList.remove('hidden');
         statsSection.classList.remove('hidden');
         accuracyMetrics.classList.remove('hidden');
         cpDetail.classList.remove('hidden');
-
     } catch (error) {
         console.error('Failed to generate data:', error);
     } finally {
@@ -1364,6 +1405,31 @@ function classifyDetections(detectedIndices, groundTruthIndices) {
     return { exactMatches, closeMatches, tp, cm, fp };
 }
 
+/** Show or hide the discreet error notice near the Otava controls panel.
+ *  Reads each enabled algo's `error` field from /api/compare and aggregates
+ *  them into a small inline list. Hidden when there are no errors. */
+function renderOtavaErrorNotice(otavaMulti) {
+    const el = document.getElementById('otava-error-notice');
+    if (!el) return;
+    const errors = [];
+    if (otavaMulti) {
+        for (const algo of ALGO_ORDER) {
+            const res = otavaMulti.get(algo);
+            if (res && res.error) errors.push({ algo, error: res.error });
+        }
+    }
+    if (errors.length === 0) {
+        el.classList.add('hidden');
+        el.innerHTML = '';
+        return;
+    }
+    const items = errors.map(({ algo, error }) =>
+        `<li><strong>${ALGO_LABELS[algo]}:</strong> ${error}</li>`
+    ).join('');
+    el.classList.remove('hidden');
+    el.innerHTML = `<strong>Algorithm error:</strong><ul>${items}</ul>`;
+}
+
 // Update the stacked charts - one per enabled analysis method
 function updateChart(data) {
     // Destroy existing charts
@@ -1372,6 +1438,8 @@ function updateChart(data) {
 
     // Clear container
     stackedChartsContainer.innerHTML = '';
+
+    renderOtavaErrorNotice(data.otavaMulti);
 
     // Prepare data
     const labels = data.data.map((_, i) => i);
@@ -1382,17 +1450,12 @@ function updateChart(data) {
     const groundTruthIndices = allChangePoints
         .filter(cp => cp.type !== 'outlier')
         .map(cp => cp.index);
-    const detectedIndices = data.otava?.detected_indices || [];
-
     // Run MA detection if enabled
     const runMa = runMaCheckbox.checked;
     const maWindow = parseInt(maWindowInput.value);
     const maThreshold = parseFloat(maThresholdInput.value);
     const maResult = runMa ? detectChangePointsMA(values, maWindow, maThreshold) : { indices: [], details: [] };
     const maDetectedIndices = maResult.indices;
-
-    // Classify Otava detections
-    const otavaClassification = classifyDetections(detectedIndices, groundTruthIndices);
 
     // Classify MA detections
     const maClassification = classifyDetections(maDetectedIndices, groundTruthIndices);
@@ -1527,34 +1590,74 @@ function updateChart(data) {
 
     // Create Otava chart if enabled
     if (isOtavaEnabled()) {
-        const { tp: otavaTp, cm: otavaCm, fp: otavaFp, exactMatches: otavaExact, closeMatches: otavaClose } = otavaClassification;
-        const canvas = createChartContainer('otava', 'Otava Analysis', '#2563eb', otavaTp, otavaCm, otavaFp);
+        const enabledAlgos = ALGO_ORDER.filter(a => (data.otavaMulti || new Map()).has(a));
+
+        // Per-algo classification (computed once, reused for border colors
+        // and aggregated tp/cm/fp counts in the chart header).
+        const perAlgoCls = new Map();
+        let totalTp = 0, totalCm = 0, totalFp = 0;
+        for (const algo of enabledAlgos) {
+            const res = data.otavaMulti.get(algo);
+            const cls = classifyDetections(res.indices || [], groundTruthIndices);
+            perAlgoCls.set(algo, cls);
+            totalTp += cls.tp;
+            totalCm += cls.cm;
+            totalFp += cls.fp;
+        }
+
+        const canvas = createChartContainer('otava', 'Otava Analysis', '#2563eb', totalTp, totalCm, totalFp);
+
+        // Per-algo color swatches in the Otava chart header.
+        const otavaHeader = canvas.previousElementSibling;
+        if (otavaHeader && otavaHeader.classList.contains('stacked-chart-header')) {
+            const swatches = document.createElement('span');
+            swatches.className = 'otava-algo-swatches';
+            swatches.innerHTML = enabledAlgos.map(algo =>
+                `<span class="swatch"><span class="algo-dot algo-dot-${algo}"></span>${ALGO_LABELS[algo]}</span>`
+            ).join('');
+            otavaHeader.appendChild(swatches);
+        }
+
         const ctx = canvas.getContext('2d');
 
-        const otavaPointColors = values.map((_, i) => {
-            if (detectedIndices.includes(i)) {
-                if (otavaExact.has(i)) return '#f87171';  // TP - red
-                if (otavaClose.has(i)) return '#fde047';  // CM - yellow
-                return '#f97316';  // FP - orange
-            }
-            return 'transparent';
-        });
-        const otavaPointBorders = values.map((_, i) => {
-            if (detectedIndices.includes(i)) {
-                if (otavaExact.has(i)) return '#ef4444';
-                if (otavaClose.has(i)) return '#eab308';
-                return '#ea580c';
-            }
-            return 'transparent';
-        });
-        const otavaPointRadii = values.map((_, i) => detectedIndices.includes(i) ? 6 : 0);
-        const otavaPointStyles = values.map((_, i) => {
-            if (detectedIndices.includes(i)) {
-                if (otavaExact.has(i)) return 'circle';  // TP
-                if (otavaClose.has(i)) return 'rectRot';  // CM - diamond
-                return 'triangle';  // FP
-            }
-            return 'circle';
+        // Vertical-stacking offset in Y-axis data units (2% of the visible range per row).
+        const yMin = parseFloat(yMinInput.value);
+        const yMax = parseFloat(yMaxInput.value);
+        const yRange = Math.max(1, yMax - yMin);
+        const offsetUnit = yRange * 0.02;
+
+        const otavaDatasets = enabledAlgos.map((algo, algoIdx) => {
+            const res = data.otavaMulti.get(algo);
+            const indices = new Set(res.indices || []);
+            const cls = perAlgoCls.get(algo);
+            const exactMatches = cls.exactMatches;
+            const closeMatches = cls.closeMatches;
+
+            // Symmetric vertical fan: algoIdx 0..N-1, centered around 0.
+            const center = (enabledAlgos.length - 1) / 2;
+            const yOffset = (algoIdx - center) * offsetUnit;
+
+            const pointData = values.map((v, i) => indices.has(i) ? (v + yOffset) : null);
+
+            const pointBorderColors = values.map((_, i) => {
+                if (!indices.has(i)) return 'transparent';
+                if (exactMatches.has(i)) return ALGO_COLORS[algo];   // TP: blend with fill
+                if (closeMatches.has(i)) return '#f59e0b';            // CM: orange
+                return '#ef4444';                                     // FP: red
+            });
+
+            return {
+                label: `Otava (${algo})`,
+                data: pointData,
+                showLine: false,
+                fill: false,
+                pointBackgroundColor: ALGO_COLORS[algo],
+                pointBorderColor: pointBorderColors,
+                pointBorderWidth: 2,
+                pointRadius: 5,
+                pointHoverRadius: 7,
+                pointStyle: 'circle',
+            };
         });
 
         const isLast = enabledMethods[enabledMethods.length - 1] === 'otava';
@@ -1562,21 +1665,21 @@ function updateChart(data) {
             type: 'line',
             data: {
                 labels: labels,
-                datasets: [{
-                    label: data.generator,
-                    data: values,
-                    borderColor: '#94a3b8',
-                    backgroundColor: 'rgba(148, 163, 184, 0.1)',
-                    borderWidth: 1.5,
-                    fill: true,
-                    tension: 0,
-                    pointBackgroundColor: otavaPointColors,
-                    pointBorderColor: otavaPointBorders,
-                    pointBorderWidth: 1.5,
-                    pointRadius: otavaPointRadii,
-                    pointHoverRadius: 8,
-                    pointStyle: otavaPointStyles,
-                }]
+                datasets: [
+                    {
+                        label: data.generator,
+                        data: values,
+                        borderColor: '#94a3b8',
+                        backgroundColor: 'rgba(148, 163, 184, 0.1)',
+                        borderWidth: 1.5,
+                        fill: true,
+                        tension: 0,
+                        pointBackgroundColor: 'transparent',
+                        pointBorderColor: 'transparent',
+                        pointRadius: 0,
+                    },
+                    ...otavaDatasets,
+                ]
             },
             options: getChartOptions(createAnnotations(), isLast)
         });
@@ -1919,13 +2022,24 @@ function updateChart(data) {
         `;
     }
 
-    // Store all results for accuracy metrics display
-    data._methodResults = {
-        otava: isOtavaEnabled() ? {
-            name: 'Otava',
-            classification: otavaClassification,
-            detectedIndices: detectedIndices
-        } : null,
+    // Store all results for accuracy metrics display. One Otava entry per
+    // enabled algorithm so the accuracy table renders a row per algorithm.
+    data._methodResults = {};
+    if (data.otavaMulti && data.otavaMulti.size > 0) {
+        for (const algo of ALGO_ORDER) {
+            const res = data.otavaMulti.get(algo);
+            if (!res) continue;
+            const indices = res.indices || [];
+            const classification = classifyDetections(indices, groundTruthIndices);
+            data._methodResults[`otava_${algo}`] = {
+                name: `Otava (${algo})`,
+                classification,
+                detectedIndices: indices,
+                algo,
+            };
+        }
+    }
+    Object.assign(data._methodResults, {
         ma: runMa ? {
             name: 'Moving Average',
             classification: maClassification,
@@ -1950,9 +2064,28 @@ function updateChart(data) {
             name: 'Std Dev',
             classification: stdDevClassification,
             detectedIndices: stdDevDetectedIndices
-        } : null
-    };
+        } : null,
+    });
     data._groundTruthCount = groundTruthIndices.length;
+}
+
+// Render per-algorithm Otava detected counts
+function renderOtavaDetectedStat(otavaMulti) {
+    const algos = ALGO_ORDER.filter(a => (otavaMulti || new Map()).has(a));
+    if (algos.length === 0) return '-';
+    if (algos.length === 1) {
+        const algo = algos[0];
+        const count = otavaMulti.get(algo).count || 0;
+        return String(count);
+    }
+    const segments = algos.map(algo => {
+        const count = otavaMulti.get(algo).count || 0;
+        return `<span class="otava-stat-segment">
+            <span class="algo-dot algo-dot-${algo}"></span>
+            <span>${ALGO_LABELS[algo]} ${count}</span>
+        </span>`;
+    });
+    return `<span class="otava-stat-segments">${segments.join('')}</span>`;
 }
 
 // Update statistics display
@@ -1970,7 +2103,7 @@ function updateStats(data) {
     const allCPs = data.ground_truth?.change_points || data.change_points || [];
     const trueChangePointCount = allCPs.filter(cp => cp.type !== 'outlier').length;
     statCpTruth.textContent = trueChangePointCount;
-    statCpDetected.textContent = data.otava?.count ?? '-';
+    statCpDetected.innerHTML = renderOtavaDetectedStat(data.otavaMulti);
 }
 
 // Update accuracy metrics display
@@ -1989,7 +2122,10 @@ function updateAccuracyMetrics(data) {
     }
 
     // Add a row for each enabled method
-    const methodOrder = ['otava', 'ma', 'boundary', 'threshold', 'slidingWindow', 'stdDev'];
+    const methodOrder = [
+        'otava_split', 'otava_orig', 'otava_deterministic',
+        'ma', 'boundary', 'threshold', 'slidingWindow', 'stdDev',
+    ];
     let hasAnyMethod = false;
 
     for (const methodKey of methodOrder) {
@@ -2041,55 +2177,121 @@ function updateComparisonTables(data) {
     detectedTableBody.innerHTML = '';
 
     const groundTruth = data.ground_truth?.change_points || data.change_points || [];
-    const detected = data.otava?.detected_change_points || [];
-    const matchedPairs = data.accuracy?.matched_pairs || [];
+    const groundTruthIndices = groundTruth
+        .filter(cp => cp.type !== 'outlier')
+        .map(cp => cp.index);
 
-    const matchedTruthIndices = new Set(matchedPairs.map(p => p.ground_truth));
-    const matchedDetectedIndices = new Set(matchedPairs.map(p => p.detected));
+    const otavaMulti = data.otavaMulti || new Map();
+    const enabledAlgos = ALGO_ORDER.filter(a => otavaMulti.has(a));
 
-    // Ground truth table
+    // ── Detected table head: rebuild per-algo columns. ──────────────
+    const head = document.getElementById('detected-table-head-row');
+    head.innerHTML = '<th>Index</th><th>Mean Before</th><th>Mean After</th>';
+    enabledAlgos.forEach(algo => {
+        const th = document.createElement('th');
+        th.innerHTML = `<span class="algo-dot algo-dot-${algo}"></span>${ALGO_LABELS[algo]}`;
+        head.appendChild(th);
+    });
+
+    // ── Per-algo classifications (computed once, reused below). ─────
+    const perAlgoCls = new Map();
+    for (const algo of enabledAlgos) {
+        const res = otavaMulti.get(algo);
+        perAlgoCls.set(algo, classifyDetections(res.indices || [], groundTruthIndices));
+    }
+
+    // ── Detected table body: one row per detected index. ────────────
+    // Build a per-index map: index -> { perAlgo: { algo: cp }, anyCp: cp }
+    const byIndex = new Map();
+    for (const algo of enabledAlgos) {
+        const res = otavaMulti.get(algo);
+        for (const cp of (res.change_points || [])) {
+            if (!byIndex.has(cp.index)) byIndex.set(cp.index, { perAlgo: {}, anyCp: cp });
+            byIndex.get(cp.index).perAlgo[algo] = cp;
+        }
+    }
+
+    if (byIndex.size === 0) {
+        const row = document.createElement('tr');
+        const colspan = 3 + enabledAlgos.length;
+        row.innerHTML = `<td colspan="${colspan || 3}" class="empty-message">No change points detected by Otava</td>`;
+        detectedTableBody.appendChild(row);
+    } else {
+        const sortedIndices = [...byIndex.keys()].sort((a, b) => a - b);
+        for (const idx of sortedIndices) {
+            const { perAlgo, anyCp } = byIndex.get(idx);
+            const row = document.createElement('tr');
+
+            // Index, mean_before, mean_after — taken from the first algo (in
+            // canonical order) that detected this index, since those values
+            // are a function of position and agree across algos.
+            const firstAlgo = enabledAlgos.find(a => perAlgo[a]);
+            const cpRef = firstAlgo ? perAlgo[firstAlgo] : anyCp;
+            row.innerHTML = `
+                <td><strong>${idx}</strong></td>
+                <td>${cpRef.mean_before != null ? cpRef.mean_before.toFixed(2) : '-'}</td>
+                <td>${cpRef.mean_after  != null ? cpRef.mean_after.toFixed(2)  : '-'}</td>
+            `;
+
+            // Per-algo cells.
+            for (const algo of enabledAlgos) {
+                const td = document.createElement('td');
+                const cp = perAlgo[algo];
+                if (!cp) {
+                    td.innerHTML = '<span class="pvalue-empty">—</span>';
+                } else {
+                    const cls = perAlgoCls.get(algo);
+                    let kls = 'pvalue-fp';
+                    if (cls.exactMatches.has(idx)) kls = 'pvalue-tp';
+                    else if (cls.closeMatches.has(idx)) kls = 'pvalue-cm';
+                    const p = cp.pvalue != null ? cp.pvalue.toExponential(2) : '—';
+                    td.innerHTML = `<span class="${kls}">${p}</span>`;
+                }
+                row.appendChild(td);
+            }
+            detectedTableBody.appendChild(row);
+        }
+    }
+
+    // ── Ground-truth table body with per-algo "Matched by" dots. ────
     if (groundTruth.length === 0) {
         const row = document.createElement('tr');
         row.innerHTML = '<td colspan="4" class="empty-message">No ground truth change points</td>';
         truthTableBody.appendChild(row);
     } else {
         groundTruth.forEach(cp => {
-            const matched = matchedTruthIndices.has(cp.index);
-            const matchInfo = matchedPairs.find(p => p.ground_truth === cp.index);
+            const matched = matchedByList(cp.index, enabledAlgos, perAlgoCls, otavaMulti);
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td><strong>${cp.index}</strong></td>
                 <td>${cp.type}</td>
                 <td>${cp.description || '-'}</td>
-                <td class="${matched ? 'status-matched' : 'status-missed'}">
-                    ${matched ? `Yes (at ${matchInfo.detected})` : 'No'}
-                </td>
+                <td>${matched}</td>
             `;
             truthTableBody.appendChild(row);
         });
     }
+}
 
-    // Detected table
-    if (detected.length === 0) {
-        const row = document.createElement('tr');
-        row.innerHTML = '<td colspan="5" class="empty-message">No change points detected by Otava</td>';
-        detectedTableBody.appendChild(row);
-    } else {
-        detected.forEach(cp => {
-            const isTP = matchedDetectedIndices.has(cp.index);
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td><strong>${cp.index}</strong></td>
-                <td>${cp.mean_before.toFixed(2)}</td>
-                <td>${cp.mean_after.toFixed(2)}</td>
-                <td>${cp.pvalue.toExponential(2)}</td>
-                <td class="${isTP ? 'status-tp' : 'status-fp'}">
-                    ${isTP ? 'True Positive' : 'False Positive'}
-                </td>
-            `;
-            detectedTableBody.appendChild(row);
+/** For a single GT index, return HTML showing which algos matched and how. */
+function matchedByList(gtIndex, enabledAlgos, perAlgoCls, otavaMulti) {
+    if (enabledAlgos.length === 0) return '<span class="matched-entry-miss">—</span>';
+    const parts = enabledAlgos.map(algo => {
+        const cls = perAlgoCls.get(algo);
+        const res = otavaMulti.get(algo);
+        const det = (res.indices || []).find(d => {
+            if (cls.exactMatches.has(d) && d === gtIndex) return true;
+            return cls.closeMatches.has(d) && Math.abs(d - gtIndex) <= CLOSE_MATCH_TOLERANCE;
         });
-    }
+        const dot = `<span class="algo-dot algo-dot-${algo}"></span>`;
+        const label = ALGO_LABELS[algo];
+        if (det == null) {
+            return `<span class="matched-entry matched-entry-miss">${dot}${label} —</span>`;
+        }
+        const tag = (det === gtIndex) ? `${det}` : `${det} (CM)`;
+        return `<span class="matched-entry">${dot}${label} ${tag}</span>`;
+    });
+    return `<span class="matched-by-list">${parts.join('')}</span>`;
 }
 
 // Show all patterns with Otava comparison
@@ -3112,36 +3314,23 @@ async function computeAndDisplayMixedData() {
             change_points: mixedChangePoints,
             count: mixedChangePoints.filter(cp => cp.type !== 'outlier').length
         },
-        otava: null,  // Will be computed by updateChart if checkbox is enabled
     };
 
-    // Run Otava analysis on mixed data if enabled
     if (isOtavaEnabled()) {
         try {
-            // The mix chart renders a single Otava result; pick the primary algo.
-            const algo = primaryOtavaAlgorithm();
-            const params = new URLSearchParams({
-                otava_algorithm: algo,
-                ...getOtavaParamsForAlgo(algo),
-            });
-            const response = await fetch(`/api/detect?${params}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ data: mixedData })
-            });
-            const otavaResult = await response.json();
-            if (!otavaResult.error) {
-                fakeData.otava = otavaResult;
-            }
+            fakeData.otavaMulti = await runOtavaForEnabled(mixedData);
         } catch (error) {
             console.error('Failed to run Otava on mixed data:', error);
+            fakeData.otavaMulti = new Map();
         }
+    } else {
+        fakeData.otavaMulti = new Map();
     }
 
     updateChart(fakeData);
     updateStats(fakeData);
     updateAccuracyMetrics(fakeData);
-    updateMixComparisonTables(fakeData);
+    updateComparisonTables(fakeData);
     updateGeneratorInfo();
 
     // Show chart sections
@@ -3151,54 +3340,6 @@ async function computeAndDisplayMixedData() {
     accuracyMetrics.classList.remove('hidden');
     cpDetail.classList.remove('hidden');
     multiChartContainer.classList.add('hidden');
-}
-
-/**
- * Update comparison tables for mix mode
- */
-function updateMixComparisonTables(data) {
-    truthTableBody.innerHTML = '';
-    detectedTableBody.innerHTML = '';
-
-    const groundTruth = data.ground_truth?.change_points || [];
-    const detected = data.otava?.detected_change_points || [];
-
-    // Ground truth table
-    if (groundTruth.length === 0) {
-        const row = document.createElement('tr');
-        row.innerHTML = '<td colspan="4" class="empty-message">No ground truth change points</td>';
-        truthTableBody.appendChild(row);
-    } else {
-        groundTruth.forEach(cp => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td><strong>${cp.index}</strong></td>
-                <td>${cp.type}</td>
-                <td>${cp.description || '-'}</td>
-                <td>-</td>
-            `;
-            truthTableBody.appendChild(row);
-        });
-    }
-
-    // Detected table
-    if (!detected || detected.length === 0) {
-        const row = document.createElement('tr');
-        row.innerHTML = '<td colspan="5" class="empty-message">No change points detected by Otava</td>';
-        detectedTableBody.appendChild(row);
-    } else {
-        detected.forEach(cp => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td><strong>${cp.index}</strong></td>
-                <td>${cp.mean_before?.toFixed(2) || '-'}</td>
-                <td>${cp.mean_after?.toFixed(2) || '-'}</td>
-                <td>${cp.pvalue?.toExponential(2) || '-'}</td>
-                <td>-</td>
-            `;
-            detectedTableBody.appendChild(row);
-        });
-    }
 }
 
 /**

@@ -17,6 +17,7 @@
 
 """Tests for the /api/datasets and /api/compare endpoints."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from otava_test_data.web.main import app
@@ -209,3 +210,28 @@ def test_detect_accepts_otava_algorithm():
     )
     assert r.status_code == 200
     assert r.json()["parameters"]["algorithm"] == "orig"
+
+
+def test_compare_returns_per_detection_details():
+    """`/api/compare` results must carry per-detection stats so the frontend can
+    render the detected-change-points table without a second API call."""
+    series = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
+    r = client.post(
+        "/api/compare",
+        json={"data": series, "algorithms": ["split"]},
+    )
+    assert r.status_code == 200
+    split = r.json()["results"]["split"]
+    assert split["indices"] == [7]
+    # New fields required by the per-algorithm detected table:
+    assert "change_points" in split
+    assert len(split["change_points"]) == 1
+    cp = split["change_points"][0]
+    assert cp["index"] == 7
+    for k in ("mean_before", "mean_after", "pvalue"):
+        assert k in cp, f"missing {k} in {cp}"
+        assert isinstance(cp[k], float)
+    # Value checks: the step series [1.0]*7 + [5.0]*7 has clear segment means.
+    assert cp["mean_before"] == pytest.approx(1.0, abs=0.01)
+    assert cp["mean_after"] == pytest.approx(5.0, abs=0.01)
+    assert 0.0 <= cp["pvalue"] <= 1.0

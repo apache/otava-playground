@@ -1761,7 +1761,11 @@ def _run_algorithm(name: str, data, window_len: int, max_pvalue: float,
         min_magnitude=min_magnitude,
         algorithm=name,
     )
-    out = {"indices": res.get("detected_indices", []), "count": res.get("count", 0)}
+    out = {
+        "indices": res.get("detected_indices", []),
+        "count": res.get("count", 0),
+        "change_points": res.get("detected_change_points", []),
+    }
     if res.get("error"):
         out["error"] = res["error"]
     return out
